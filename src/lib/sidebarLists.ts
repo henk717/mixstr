@@ -12,6 +12,7 @@ export type SourceType =
   | 'follow-list'   // Someone else's NIP-02 follow list
   | 'community'     // NIP-72 moderated community (kind 34550)
   | 'group'         // NIP-29 relay-based group
+  | 'livestream'    // NIP-53 livestreams (kind 30311)
   | 'rss'           // External RSS/Atom feed via proxy
   | 'fediverse';    // ActivityPub actor feed via proxy
 
@@ -28,10 +29,8 @@ export interface ListSource {
   dvmPubkey?: string;
   dvmKind?: number;
 
-  // people
+  // people / follow-list / livestream
   pubkeys?: string[];
-
-  // follow-list (another user's NIP-02)
   followListPubkey?: string;
 
   // community (NIP-72)
@@ -64,7 +63,17 @@ export type SidebarListIcon =
   | 'flask'
   | 'lightning'
   | 'community'
-  | 'group';
+  | 'group'
+  | 'live';
+
+export interface ListViewOptions {
+  /** Show live streams pinned at the top (opt-in). Default: false */
+  showLivestreamsAtTop?: boolean;
+  /** Media view: minimum video duration in seconds (0 = no limit) */
+  mediaMinDurationSec?: number;
+  /** Media view: maximum video duration in seconds (0 = no limit) */
+  mediaMaxDurationSec?: number;
+}
 
 export interface SidebarList {
   id: string;
@@ -74,6 +83,8 @@ export interface SidebarList {
   /** Pinned to top (appears before separator) */
   pinned?: boolean;
   createdAt: number;
+  /** Per-list view options */
+  viewOptions?: ListViewOptions;
 }
 
 export const DEFAULT_LISTS: SidebarList[] = [
@@ -122,6 +133,7 @@ export function sourceDescription(source: ListSource): string {
     case 'follow-list': return `Follow list of ${source.label ?? source.followListPubkey?.slice(0, 12) ?? '?'}`;
     case 'community': return `Community: ${source.label ?? source.communityId?.split(':')[2] ?? '?'}`;
     case 'group': return `Group: ${source.label ?? source.groupId ?? '?'}`;
+    case 'livestream': return source.pubkeys?.length ? `Livestreams (${source.pubkeys.length} authors)` : 'All livestreams';
     case 'rss': return `RSS: ${source.url ?? '?'}`;
     case 'fediverse': return `Fediverse: ${source.url ?? '?'}`;
     default: return 'Unknown';
@@ -136,6 +148,7 @@ export const ICON_OPTIONS: { value: SidebarListIcon; label: string }[] = [
   { value: 'image', label: '🖼 Media' },
   { value: 'music', label: '🎵 Music' },
   { value: 'radio', label: '📻 Radio' },
+  { value: 'live', label: '📡 Live' },
   { value: 'rss', label: '📡 RSS' },
   { value: 'globe', label: '🌐 Globe' },
   { value: 'star', label: '⭐ Star' },
@@ -147,4 +160,18 @@ export const ICON_OPTIONS: { value: SidebarListIcon; label: string }[] = [
   { value: 'lightning', label: '🔥 Lightning' },
   { value: 'community', label: '🏛 Community' },
   { value: 'group', label: '💬 Group' },
+];
+
+/** Well-known DVM providers for autocomplete */
+export const KNOWN_DVMS: { pubkey: string; name: string; description: string }[] = [
+  {
+    pubkey: '7579076d9aff0a4cfdefa7e2045f2486c7e5d8bc63bfc6b45397233e1bbfcb19',
+    name: 'Wikifreedia',
+    description: 'Wikipedia-style content DVM',
+  },
+  {
+    pubkey: '7d4b8806f1fd1fae07c3afe07e7f8b7c640e1cf1a05c5e1b8d0e14e5f3e5e5e5',
+    name: 'Algo Relay',
+    description: 'Algorithmic feed',
+  },
 ];

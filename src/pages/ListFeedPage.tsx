@@ -101,6 +101,8 @@ export function ListFeedPage() {
         hasNextPage={hasNextPage}
         isFetchingNextPage={isFetchingNextPage}
         fetchNextPage={fetchNextPage}
+        showLivestreamsAtTop={list.viewOptions?.showLivestreamsAtTop ?? false}
+        viewOptions={list.viewOptions}
       />
 
       <EditListDialog

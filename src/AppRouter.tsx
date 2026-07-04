@@ -9,6 +9,7 @@ import { ExplorePage } from "./pages/ExplorePage";
 import { MessagesPage } from "./pages/MessagesPage";
 import { ListFeedPage } from "./pages/ListFeedPage";
 import { CommunityPage } from "./pages/CommunityPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { MainLayout } from "./components/layout/MainLayout";
 
 export function AppRouter() {
@@ -61,6 +62,16 @@ export function AppRouter() {
           element={
             <MainLayout>
               <CommunityPage />
+            </MainLayout>
+          }
+        />
+
+        {/* App settings */}
+        <Route
+          path="/settings"
+          element={
+            <MainLayout>
+              <SettingsPage />
             </MainLayout>
           }
         />

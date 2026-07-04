@@ -9,7 +9,14 @@ import { LivestreamCard } from './LivestreamCard';
 import { InfiniteScrollSentinel } from './InfiniteScrollSentinel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
-import { hasAudio, hasMedia, isLivestream } from '@/lib/postUtils';
+import { hasMedia, isLivestream, getAudioTrackInfo, getLivestreamInfo, getMediaDuration } from '@/lib/postUtils';
+import type { ListViewOptions } from '@/lib/sidebarLists';
+import { useMuteList } from '@/hooks/useMuteList';
+
+/** Helper to check livestream status without importing extra */
+function getLivestreamStatus(event: NostrEvent): string {
+  return getLivestreamInfo(event)?.status ?? 'ended';
+}
 
 interface FeedViewProps {
   /** Flat list of events (for non-paginated use) */
@@ -21,6 +28,10 @@ interface FeedViewProps {
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
   fetchNextPage?: () => void;
+  /** If true, NIP-53 livestreams with status=live float to the top of the feed */
+  showLivestreamsAtTop?: boolean;
+  /** Per-list view options (duration filter etc.) */
+  viewOptions?: ListViewOptions;
 }
 
 function filterForMode(events: NostrEvent[], mode: FeedViewMode): NostrEvent[] {
@@ -28,8 +39,17 @@ function filterForMode(events: NostrEvent[], mode: FeedViewMode): NostrEvent[] {
     case 'media':
       return events.filter((e) => isLivestream(e) || hasMedia(e) || e.kind === 20 || e.kind === 34235);
     case 'audio':
-      // Videos are also audio-eligible (played as audio in the player bar)
-      return events.filter((e) => isLivestream(e) || hasAudio(e) || e.kind === 31337 || e.kind === 34236);
+      // getAudioTrackInfo is the strict gate — must return a URL to pass
+      // Livestreams only pass if they have an actual streaming URL (HLS/MP4 in the streaming tag)
+      return events.filter((e) => {
+        if (e.kind === 31337 || e.kind === 34236) return true;
+        const trackInfo = getAudioTrackInfo(e);
+        if (!trackInfo) return false;
+        // Reject if the "url" only resolves to what looks like an image
+        const url = trackInfo.url.toLowerCase();
+        if (/\.(jpe?g|png|gif|webp|avif|svg)(\?.*)?$/.test(url)) return false;
+        return true;
+      });
     case 'short':
     case 'longform':
     default:
@@ -45,7 +65,11 @@ export function FeedView({
   hasNextPage,
   isFetchingNextPage,
   fetchNextPage,
+  showLivestreamsAtTop = false,
+  viewOptions,
 }: FeedViewProps) {
+  const { isMuted } = useMuteList();
+
   // Merge flat events or pages into one deduplicated list
   const allEvents = useMemo(() => {
     let raw: NostrEvent[];
@@ -62,15 +86,38 @@ export function FeedView({
     });
   }, [pages, flatEvents]);
 
+  // Apply mute list filter
+  const visibleEvents = useMemo(
+    () => allEvents.filter((e) => !isMuted(e)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allEvents, isMuted],
+  );
+
   if (isLoading && allEvents.length === 0) {
     return <FeedSkeleton mode={mode} />;
   }
 
-  const filtered = filterForMode(allEvents, mode);
+  let filtered = filterForMode(visibleEvents, mode);
 
-  // Separate live streams — always float to top of every feed
-  const livestreams = filtered.filter(isLivestream);
-  const regularEvents = filtered.filter((e) => !isLivestream(e));
+  // Apply media duration filter if set
+  if (mode === 'media' && (viewOptions?.mediaMinDurationSec || viewOptions?.mediaMaxDurationSec)) {
+    const minSec = viewOptions.mediaMinDurationSec ?? 0;
+    const maxSec = viewOptions.mediaMaxDurationSec ?? Infinity;
+    filtered = filtered.filter((e) => {
+      const dur = getMediaDuration(e);
+      // If no duration metadata, only filter out if BOTH bounds are set (be inclusive by default)
+      if (dur === undefined) return minSec === 0;
+      return dur >= minSec && (maxSec === Infinity || dur <= maxSec);
+    });
+  }
+
+  // Separate live streams — float to top only if showLivestreamsAtTop is enabled
+  const livestreams = showLivestreamsAtTop
+    ? filtered.filter((e) => isLivestream(e) && getLivestreamStatus(e) === 'live')
+    : [];
+  const regularEvents = showLivestreamsAtTop
+    ? filtered.filter((e) => !(isLivestream(e) && getLivestreamStatus(e) === 'live'))
+    : filtered;
 
   const isPaginated = !!fetchNextPage;
   const sentinelVariant = mode === 'media' ? 'grid' : mode === 'audio' ? 'audio' : 'list';

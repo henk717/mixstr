@@ -1,5 +1,11 @@
-import { useState } from 'react';
-import { Plus, Trash2, GripVertical, X } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Plus, GripVertical, X, Wifi, Search, Check } from 'lucide-react';
+import { useFollowing } from '@/hooks/useFollowing';
+import { useNostr } from '@nostrify/react';
+import { useQuery } from '@tanstack/react-query';
+import { nip19 } from 'nostr-tools';
+import type { NostrMetadata } from '@nostrify/nostrify';
+import { KNOWN_DVMS } from '@/lib/sidebarLists';
 import {
   Dialog,
   DialogContent,
@@ -23,11 +29,13 @@ import {
   type SidebarList,
   type SidebarListIcon,
   type ListSource,
+  type ListViewOptions,
   type SourceType,
   ICON_OPTIONS,
   createSourceId,
-  sourceDescription,
 } from '@/lib/sidebarLists';
+import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
 import { ListIcon } from './ListIcon';
 
 interface EditListDialogProps {
@@ -44,9 +52,238 @@ const SOURCE_TYPES: { value: SourceType; label: string; description: string }[] 
   { value: 'dvm', label: 'DVM Feed', description: 'AI-curated feed from a Data Vending Machine' },
   { value: 'community', label: 'Community (NIP-72)', description: 'Reddit-style Nostr community' },
   { value: 'group', label: 'Group (NIP-29)', description: 'Relay-based closed group' },
+  { value: 'livestream', label: 'Livestreams', description: 'NIP-53 live streams (kind 30311)' },
   { value: 'rss', label: 'RSS / Atom Feed', description: 'External blog or news feed' },
   { value: 'fediverse', label: 'Fediverse Actor', description: 'ActivityPub user feed (via proxy)' },
 ];
+
+/** Format seconds into m:ss or h:mm:ss */
+function formatDuration(sec: number): string {
+  if (sec <= 0) return 'No limit';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s > 0 ? s + 's' : ''}`.trim();
+  return `${s}s`;
+}
+
+/** Convert npub or hex to hex pubkey, returns undefined if invalid */
+function toHexPubkey(value: string): string | undefined {
+  const v = value.trim();
+  if (!v) return undefined;
+  if (/^[0-9a-f]{64}$/i.test(v)) return v.toLowerCase();
+  try {
+    const decoded = nip19.decode(v);
+    if (decoded.type === 'npub') return decoded.data as string;
+    if (decoded.type === 'nprofile') return (decoded.data as { pubkey: string }).pubkey;
+  } catch {}
+  return undefined;
+}
+
+/** Autocomplete people picker backed by the user's follow list */
+function PeopleField({
+  pubkeys,
+  onChange,
+  label = 'People (from your follows)',
+  placeholder = 'Search by name or paste npub…',
+}: {
+  pubkeys: string[];
+  onChange: (pks: string[]) => void;
+  label?: string;
+  placeholder?: string;
+}) {
+  const { nostr } = useNostr();
+  const { data: followingHex = [] } = useFollowing();
+
+  // Fetch metadata for all follows so we can show names
+  const { data: metaMap = {} } = useQuery<Record<string, NostrMetadata>>({
+    queryKey: ['nostr', 'follow-meta-batch', followingHex.slice(0, 150).join(',')],
+    queryFn: async ({ signal }) => {
+      if (!followingHex.length) return {};
+      const events = await nostr.query(
+        [{ kinds: [0], authors: followingHex.slice(0, 150), limit: 150 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+      );
+      const map: Record<string, NostrMetadata> = {};
+      for (const ev of events) {
+        try {
+          map[ev.pubkey] = JSON.parse(ev.content) as NostrMetadata;
+        } catch {}
+      }
+      return map;
+    },
+    enabled: followingHex.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const [search, setSearch] = useState('');
+  const [manualInput, setManualInput] = useState('');
+
+  const suggestions = useMemo(() => {
+    const q = search.toLowerCase();
+    return followingHex
+      .map((pk) => {
+        const meta = metaMap[pk];
+        const name = meta?.display_name || meta?.name || '';
+        return { pk, name };
+      })
+      .filter(({ pk, name }) => {
+        if (!q) return true;
+        return name.toLowerCase().includes(q) || pk.includes(q);
+      })
+      .slice(0, 20);
+  }, [followingHex, metaMap, search]);
+
+  const toggle = (pk: string) => {
+    if (pubkeys.includes(pk)) {
+      onChange(pubkeys.filter((p) => p !== pk));
+    } else {
+      onChange([...pubkeys, pk]);
+    }
+  };
+
+  const addManual = () => {
+    const hex = toHexPubkey(manualInput);
+    if (hex && !pubkeys.includes(hex)) {
+      onChange([...pubkeys, hex]);
+    }
+    setManualInput('');
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+
+      {/* Chips for selected pubkeys */}
+      {pubkeys.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {pubkeys.map((pk) => {
+            const meta = metaMap[pk];
+            const name = meta?.display_name || meta?.name || pk.slice(0, 8) + '…';
+            return (
+              <Badge key={pk} variant="secondary" className="text-xs gap-1 pr-1">
+                {name}
+                <button
+                  onClick={() => onChange(pubkeys.filter((p) => p !== pk))}
+                  className="text-muted-foreground hover:text-destructive transition-colors"
+                >
+                  <X size={10} />
+                </button>
+              </Badge>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Search follows */}
+      {followingHex.length > 0 && (
+        <div className="relative">
+          <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search your follows…"
+            className="h-7 text-xs bg-background pl-6"
+          />
+        </div>
+      )}
+
+      {/* Suggestion list */}
+      {search !== '' && suggestions.length > 0 && (
+        <div className="max-h-32 overflow-y-auto border border-border rounded-md bg-background text-xs divide-y divide-border">
+          {suggestions.map(({ pk, name }) => {
+            const selected = pubkeys.includes(pk);
+            return (
+              <button
+                key={pk}
+                className={cn(
+                  'flex items-center justify-between w-full px-2 py-1.5 hover:bg-accent transition-colors text-left',
+                  selected && 'text-primary',
+                )}
+                onClick={() => toggle(pk)}
+              >
+                <span className="truncate">{name || pk.slice(0, 12) + '…'}</span>
+                {selected && <Check size={11} className="flex-shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Manual npub/hex input */}
+      <div className="flex gap-1.5">
+        <Input
+          value={manualInput}
+          onChange={(e) => setManualInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && addManual()}
+          placeholder={placeholder}
+          className="h-7 text-xs bg-background flex-1"
+        />
+        <Button size="sm" variant="outline" onClick={addManual} className="h-7 px-2 text-xs">
+          Add
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** DVM source picker — shows known DVMs as autocomplete, with manual entry */
+function DvmField({
+  dvmPubkey,
+  onChange,
+}: {
+  dvmPubkey: string;
+  onChange: (pk: string) => void;
+}) {
+
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs text-muted-foreground">DVM provider</Label>
+
+      {/* Known DVMs */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Known DVMs</p>
+        {KNOWN_DVMS.map((dvm) => {
+          const isSelected = dvmPubkey === dvm.pubkey;
+          return (
+            <button
+              key={dvm.pubkey}
+              onClick={() => onChange(dvm.pubkey)}
+              className={cn(
+                'w-full flex items-start gap-2 text-left px-2.5 py-2 rounded-lg border text-xs transition-colors',
+                isSelected
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-background hover:bg-accent',
+              )}
+            >
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold">{dvm.name}</p>
+                <p className="text-muted-foreground text-[11px]">{dvm.description}</p>
+              </div>
+              {isSelected && <Check size={13} className="flex-shrink-0 mt-0.5" />}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Manual entry */}
+      <div className="space-y-1">
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Or enter npub manually</p>
+        <Input
+          value={dvmPubkey}
+          onChange={(e) => onChange(e.target.value.trim())}
+          placeholder="npub1... (DVM provider pubkey)"
+          className="h-7 text-xs bg-background"
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        DVM feeds use NIP-90 Data Vending Machines to return curated content.
+      </p>
+    </div>
+  );
+}
 
 function SourceEditor({
   source,
@@ -99,55 +336,31 @@ function SourceEditor({
       )}
 
       {source.type === 'people' && (
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">npub or hex pubkeys (one per line)</Label>
-          <textarea
-            value={(source.pubkeys ?? []).join('\n')}
-            onChange={(e) =>
-              onChange({
-                ...source,
-                pubkeys: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean),
-              })
-            }
-            placeholder="npub1... or hex pubkey"
-            className="w-full h-20 text-xs bg-background border border-input rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <p className="text-xs text-muted-foreground">
-            {source.pubkeys?.length ?? 0} pubkey(s)
-          </p>
-        </div>
+        <PeopleField
+          pubkeys={source.pubkeys ?? []}
+          onChange={(pubkeys) => onChange({ ...source, pubkeys })}
+        />
       )}
 
       {source.type === 'follow-list' && (
-        <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">User's npub or hex pubkey</Label>
-          <Input
-            value={source.followListPubkey ?? ''}
-            onChange={(e) => onChange({ ...source, followListPubkey: e.target.value.trim() })}
-            placeholder="npub1..."
-            className="h-7 text-xs bg-background"
+        <div className="space-y-2">
+          <PeopleField
+            pubkeys={source.followListPubkey ? [source.followListPubkey] : []}
+            onChange={(pks) => onChange({ ...source, followListPubkey: pks[0] ?? '' })}
+            label="Whose follow list to use"
+            placeholder="Search or paste npub1…"
           />
           <p className="text-xs text-muted-foreground">
-            This will fetch and use their NIP-02 contact list
+            Fetches and uses their NIP-02 contact list as the source.
           </p>
         </div>
       )}
 
       {source.type === 'dvm' && (
-        <div className="space-y-2">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">DVM npub / pubkey</Label>
-            <Input
-              value={source.dvmPubkey ?? ''}
-              onChange={(e) => onChange({ ...source, dvmPubkey: e.target.value.trim() })}
-              placeholder="npub1... (DVM provider pubkey)"
-              className="h-7 text-xs bg-background"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            DVM feeds use NIP-90 Data Vending Machines to return curated content
-          </p>
-        </div>
+        <DvmField
+          dvmPubkey={source.dvmPubkey ?? ''}
+          onChange={(dvmPubkey) => onChange({ ...source, dvmPubkey })}
+        />
       )}
 
       {source.type === 'community' && (
@@ -193,6 +406,21 @@ function SourceEditor({
         </div>
       )}
 
+      {source.type === 'livestream' && (
+        <div className="space-y-2">
+          <PeopleField
+            pubkeys={source.pubkeys ?? []}
+            onChange={(pubkeys) => onChange({ ...source, pubkeys })}
+            label="Filter by authors (optional)"
+            placeholder="Leave empty for all livestreams"
+          />
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Wifi size={11} />
+            Shows NIP-53 live streams. Leave authors empty to see all.
+          </p>
+        </div>
+      )}
+
       {(source.type === 'rss' || source.type === 'fediverse') && (
         <div className="space-y-1">
           <Label className="text-xs text-muted-foreground">
@@ -224,6 +452,7 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
   const [icon, setIcon] = useState<SidebarListIcon>(initial?.icon ?? 'hash');
   const [sources, setSources] = useState<ListSource[]>(initial?.sources ?? []);
   const [newSourceType, setNewSourceType] = useState<SourceType>('hashtag');
+  const [viewOptions, setViewOptions] = useState<ListViewOptions>(initial?.viewOptions ?? {});
 
   const addSource = () => {
     setSources((prev) => [
@@ -249,6 +478,7 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
       sources,
       pinned: initial?.pinned,
       createdAt: initial?.createdAt ?? Date.now(),
+      viewOptions,
     });
     onClose();
   };
@@ -347,6 +577,72 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
                 <Plus size={13} />
                 Add
               </Button>
+            </div>
+          </div>
+
+          {/* View Options */}
+          <div className="space-y-3 border-t border-border pt-4">
+            <Label className="text-sm font-semibold">View Options</Label>
+
+            {/* Livestream pinning toggle */}
+            <div className="flex items-center justify-between gap-3 bg-card border border-border rounded-lg p-3">
+              <div>
+                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Wifi size={12} className="text-red-500" />
+                  Pin live streams to top
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Ongoing NIP-53 streams float above the feed when active
+                </p>
+              </div>
+              <Switch
+                checked={viewOptions.showLivestreamsAtTop ?? false}
+                onCheckedChange={(v) => setViewOptions((prev) => ({ ...prev, showLivestreamsAtTop: v }))}
+              />
+            </div>
+
+            {/* Video duration filter */}
+            <div className="bg-card border border-border rounded-lg p-3 space-y-3">
+              <p className="text-xs font-medium text-foreground">Video duration filter (media tab)</p>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Min duration</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {viewOptions.mediaMinDurationSec
+                      ? formatDuration(viewOptions.mediaMinDurationSec)
+                      : 'No limit'}
+                  </span>
+                </div>
+                <Slider
+                  min={0}
+                  max={600}
+                  step={5}
+                  value={[viewOptions.mediaMinDurationSec ?? 0]}
+                  onValueChange={([v]) => setViewOptions((prev) => ({ ...prev, mediaMinDurationSec: v || undefined }))}
+                  className="w-full"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs text-muted-foreground">Max duration</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {viewOptions.mediaMaxDurationSec
+                      ? formatDuration(viewOptions.mediaMaxDurationSec)
+                      : 'No limit'}
+                  </span>
+                </div>
+                <Slider
+                  min={0}
+                  max={7200}
+                  step={30}
+                  value={[viewOptions.mediaMaxDurationSec ?? 0]}
+                  onValueChange={([v]) => setViewOptions((prev) => ({ ...prev, mediaMaxDurationSec: v || undefined }))}
+                  className="w-full"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Only shows videos within this range in the media tab. 0 = no limit.
+              </p>
             </div>
           </div>
         </div>

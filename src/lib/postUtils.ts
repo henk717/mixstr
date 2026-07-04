@@ -276,16 +276,16 @@ export function hasMedia(event: NostrEvent): boolean {
 }
 
 /**
- * Check if event is audio-eligible: true audio files, video files (treat as
- * audio with video thumbnail), kind 31337 audio tracks, or kind 34236.
+ * Check if event is audio-eligible: true audio files, video FILES (not external
+ * embeds), kind 31337 audio tracks, or kind 34236.
+ * Uses getAudioTrackInfo as the ground truth — if there's no playable URL, it's not eligible.
  */
 export function hasAudio(event: NostrEvent): boolean {
-  return (
-    extractAudio(event).length > 0 ||
-    extractVideos(event).length > 0 ||      // videos are audio-eligible
-    event.kind === 31337 ||
-    event.kind === 34236
-  );
+  if (event.kind === 31337 || event.kind === 34236) return true;
+  // Must have a concrete playable URL — not just images or external embeds
+  const audioUrls = extractAudio(event);
+  const videoUrls = extractVideos(event);
+  return audioUrls.length > 0 || videoUrls.length > 0;
 }
 
 /** Get track info for the audio player from any event */
@@ -314,6 +314,30 @@ export function getAudioTrackInfo(event: NostrEvent): {
   const artist = event.tags.find(([t]) => t === 'artist')?.[1];
   const artwork = getCoverImage(event);
   return { title, url, artist, artwork, isVideo };
+}
+
+/**
+ * Get video/audio duration from event tags (NIP-94 `duration` tag, in seconds).
+ * Returns undefined if no duration tag found.
+ */
+export function getMediaDuration(event: NostrEvent): number | undefined {
+  // Check imeta tags for duration
+  for (const tag of event.tags) {
+    if (tag[0] === 'imeta') {
+      const durEntry = tag.find((v) => v.startsWith('duration '));
+      if (durEntry) {
+        const sec = parseFloat(durEntry.slice(9));
+        if (!isNaN(sec) && sec > 0) return Math.round(sec);
+      }
+    }
+  }
+  // Direct duration tag
+  const dur = event.tags.find(([t]) => t === 'duration')?.[1];
+  if (dur) {
+    const sec = parseFloat(dur);
+    if (!isNaN(sec) && sec > 0) return Math.round(sec);
+  }
+  return undefined;
 }
 
 /** Encode an event to a nevent nip19 identifier for navigation */
