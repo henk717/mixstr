@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import NotFound from './NotFound';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProfilePage } from './ProfilePage';
+import { EventDetailPage } from './EventDetailPage';
 
 export function NIP19Page() {
   const { nip19: identifier } = useParams<{ nip19: string }>();
@@ -31,17 +32,36 @@ export function NIP19Page() {
       );
     }
 
-    case 'note':
-    case 'nevent':
-    case 'naddr':
-      // TODO: implement event/article views
+    case 'note': {
       return (
         <MainLayout>
-          <div className="max-w-2xl mx-auto px-4 py-8 text-muted-foreground text-center">
-            Event view coming soon.
-          </div>
+          <EventDetailPage eventId={decoded.data} />
         </MainLayout>
       );
+    }
+
+    case 'nevent': {
+      return (
+        <MainLayout>
+          <EventDetailPage
+            eventId={decoded.data.id}
+            pubkey={decoded.data.author}
+          />
+        </MainLayout>
+      );
+    }
+
+    case 'naddr': {
+      // Addressable events (articles etc.) — navigate to event detail
+      return (
+        <MainLayout>
+          <EventDetailPage
+            eventId={decoded.data.identifier}
+            pubkey={decoded.data.pubkey}
+          />
+        </MainLayout>
+      );
+    }
 
     default:
       return <NotFound />;

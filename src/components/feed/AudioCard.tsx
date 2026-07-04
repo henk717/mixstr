@@ -1,16 +1,15 @@
+import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { Play, Plus, Music, Video } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
 import {
-  extractAudio,
-  extractVideos,
-  extractImages,
   getEventTitle,
   getCoverImage,
   relativeTime,
   getAudioTrackInfo,
+  eventToNevent,
 } from '@/lib/postUtils';
 import { useMixstr } from '@/hooks/useMixstr';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -19,10 +18,10 @@ import type { AudioTrack } from '@/contexts/MixstrContext';
 
 interface AudioCardProps {
   event: NostrEvent;
-  onClick?: () => void;
 }
 
-export function AudioCard({ event, onClick }: AudioCardProps) {
+export function AudioCard({ event }: AudioCardProps) {
+  const navigate = useNavigate();
   const author = useAuthor(event.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(event.pubkey);
@@ -30,24 +29,20 @@ export function AudioCard({ event, onClick }: AudioCardProps) {
   const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
   const { playTrack, addToQueue } = useMixstr();
 
-  const audioUrls = extractAudio(event);
-  const videoUrls = extractVideos(event);
-  const images = extractImages(event);
+  const trackInfo = getAudioTrackInfo(event);
   const cover = getCoverImage(event);
-  const title = getEventTitle(event) ?? event.content.slice(0, 60).trim() ?? 'Untitled Track';
+  const title = getEventTitle(event) ?? (event.content.slice(0, 60).trim() || 'Untitled Track');
+  const nevent = eventToNevent(event);
 
-  const isVideoAudio = audioUrls.length === 0 && videoUrls.length > 0;
-  const mediaUrl = audioUrls[0] ?? videoUrls[0];
-  const trackInfo = event.kind === 31337 ? getAudioTrackInfo(event) : null;
-
-  if (!mediaUrl) return null;
+  // Nothing playable
+  if (!trackInfo) return null;
 
   const track: AudioTrack = {
     event,
-    title: trackInfo?.title ?? title,
-    url: trackInfo?.url ?? mediaUrl,
-    artist: trackInfo?.artist ?? displayName,
-    artwork: trackInfo?.artwork ?? cover,
+    title: trackInfo.title,
+    url: trackInfo.url,
+    artist: displayName,
+    artwork: trackInfo.artwork ?? cover,
   };
 
   const handlePlay = (e: React.MouseEvent) => {
@@ -60,30 +55,35 @@ export function AudioCard({ event, onClick }: AudioCardProps) {
     addToQueue(track);
   };
 
+  // Clicking the row navigates to the event detail page
+  const handleRowClick = () => {
+    navigate(`/${nevent}`);
+  };
+
   return (
     <div
       className="flex items-center gap-4 px-4 py-3 border-b border-border hover:bg-accent/30 transition-colors cursor-pointer group"
-      onClick={onClick}
+      onClick={handleRowClick}
     >
-      {/* Album art */}
+      {/* Album art / video thumbnail with play overlay */}
       <div className="relative w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-muted">
-        {cover ? (
+        {track.artwork ? (
           <img
-            src={cover}
+            src={track.artwork}
             alt={title}
             className="w-full h-full object-cover"
             loading="lazy"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            {isVideoAudio ? (
+            {trackInfo.isVideo ? (
               <Video size={20} className="text-muted-foreground" />
             ) : (
               <Music size={20} className="text-muted-foreground" />
             )}
           </div>
         )}
-        {/* Hover play overlay on art */}
+        {/* Play overlay on hover */}
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             onClick={handlePlay}
@@ -104,11 +104,16 @@ export function AudioCard({ event, onClick }: AudioCardProps) {
         >
           {displayName}
         </Link>
-        <p className="text-xs text-muted-foreground">{relativeTime(event.created_at)}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs text-muted-foreground">{relativeTime(event.created_at)}</p>
+          {trackInfo.isVideo && (
+            <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded">video</span>
+          )}
+        </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="flex items-center gap-2 flex-shrink-0">
+      {/* Action buttons — stop propagation so they don't navigate */}
+      <div className="flex items-center gap-1 flex-shrink-0">
         <Button
           size="icon"
           variant="ghost"

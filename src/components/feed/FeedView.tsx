@@ -5,10 +5,11 @@ import { ShortPostCard } from './ShortPostCard';
 import { LongPostCard } from './LongPostCard';
 import { MediaCard } from './MediaCard';
 import { AudioCard } from './AudioCard';
+import { LivestreamCard } from './LivestreamCard';
 import { InfiniteScrollSentinel } from './InfiniteScrollSentinel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
-import { hasAudio, hasMedia } from '@/lib/postUtils';
+import { hasAudio, hasMedia, isLivestream } from '@/lib/postUtils';
 
 interface FeedViewProps {
   /** Flat list of events (for non-paginated use) */
@@ -25,9 +26,10 @@ interface FeedViewProps {
 function filterForMode(events: NostrEvent[], mode: FeedViewMode): NostrEvent[] {
   switch (mode) {
     case 'media':
-      return events.filter((e) => hasMedia(e) || e.kind === 20 || e.kind === 34235);
+      return events.filter((e) => isLivestream(e) || hasMedia(e) || e.kind === 20 || e.kind === 34235);
     case 'audio':
-      return events.filter((e) => hasAudio(e) || e.kind === 31337 || e.kind === 34236);
+      // Videos are also audio-eligible (played as audio in the player bar)
+      return events.filter((e) => isLivestream(e) || hasAudio(e) || e.kind === 31337 || e.kind === 34236);
     case 'short':
     case 'longform':
     default:
@@ -48,7 +50,6 @@ export function FeedView({
   const allEvents = useMemo(() => {
     let raw: NostrEvent[];
     if (pages !== undefined) {
-      // pages is NostrEvent[][] from useInfiniteQuery
       raw = pages.flatMap((p) => (Array.isArray(p) ? p : []));
     } else {
       raw = flatEvents ?? [];
@@ -66,6 +67,11 @@ export function FeedView({
   }
 
   const filtered = filterForMode(allEvents, mode);
+
+  // Separate live streams — always float to top of every feed
+  const livestreams = filtered.filter(isLivestream);
+  const regularEvents = filtered.filter((e) => !isLivestream(e));
+
   const isPaginated = !!fetchNextPage;
   const sentinelVariant = mode === 'media' ? 'grid' : mode === 'audio' ? 'audio' : 'list';
 
@@ -83,74 +89,46 @@ export function FeedView({
     );
   }
 
-  if (mode === 'media') {
-    return (
-      <div>
+  return (
+    <div>
+      {/* Livestreams always pinned to the top of every feed */}
+      {livestreams.length > 0 && (
+        <div className="py-1">
+          {livestreams.map((event) => (
+            <LivestreamCard key={event.id} event={event} />
+          ))}
+        </div>
+      )}
+
+      {/* Regular content */}
+      {mode === 'media' && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4">
-          {filtered.map((event) => (
+          {regularEvents.map((event) => (
             <MediaCard key={event.id} event={event} />
           ))}
         </div>
-        {isPaginated && (
-          <InfiniteScrollSentinel
-            hasNextPage={hasNextPage ?? false}
-            isFetchingNextPage={isFetchingNextPage ?? false}
-            fetchNextPage={fetchNextPage!}
-            variant="grid"
-          />
-        )}
-      </div>
-    );
-  }
+      )}
 
-  if (mode === 'audio') {
-    return (
-      <div>
-        {filtered.map((event) => (
-          <AudioCard key={event.id} event={event} />
-        ))}
-        {isPaginated && (
-          <InfiniteScrollSentinel
-            hasNextPage={hasNextPage ?? false}
-            isFetchingNextPage={isFetchingNextPage ?? false}
-            fetchNextPage={fetchNextPage!}
-            variant="audio"
-          />
-        )}
-      </div>
-    );
-  }
-
-  if (mode === 'longform') {
-    return (
-      <div>
-        {filtered.map((event) => (
-          <LongPostCard key={event.id} event={event} />
-        ))}
-        {isPaginated && (
-          <InfiniteScrollSentinel
-            hasNextPage={hasNextPage ?? false}
-            isFetchingNextPage={isFetchingNextPage ?? false}
-            fetchNextPage={fetchNextPage!}
-            variant="list"
-          />
-        )}
-      </div>
-    );
-  }
-
-  // short (default)
-  return (
-    <div>
-      {filtered.map((event) => (
-        <ShortPostCard key={event.id} event={event} />
+      {mode === 'audio' && regularEvents.map((event) => (
+        <AudioCard key={event.id} event={event} />
       ))}
+
+      {mode === 'longform' && regularEvents.map((event) => (
+        <LongPostCard key={event.id} event={event} />
+      ))}
+
+      {(mode === 'short' || (mode !== 'media' && mode !== 'audio' && mode !== 'longform')) &&
+        regularEvents.map((event) => (
+          <ShortPostCard key={event.id} event={event} />
+        ))
+      }
+
       {isPaginated && (
         <InfiniteScrollSentinel
           hasNextPage={hasNextPage ?? false}
           isFetchingNextPage={isFetchingNextPage ?? false}
           fetchNextPage={fetchNextPage!}
-          variant="list"
+          variant={sentinelVariant}
         />
       )}
     </div>

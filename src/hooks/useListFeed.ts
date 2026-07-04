@@ -97,7 +97,7 @@ async function fetchSource(
       const pubkeys = (source.pubkeys ?? []).map(toPubkeyHex).filter(Boolean);
       if (pubkeys.length === 0) return [];
       return nostr.query(
-        [{ kinds: [1, 6, 20, 30023], authors: pubkeys, limit, ...timeFilter }],
+        [{ kinds: [1, 6, 20, 30023, 30311], authors: pubkeys, limit, ...timeFilter }],
         { signal: abort },
       );
     }
@@ -120,7 +120,7 @@ async function fetchSource(
       const results = await Promise.all(
         chunks.map((chunk) =>
           nostr.query(
-            [{ kinds: [1, 6, 20, 30023], authors: chunk, limit, ...timeFilter }],
+            [{ kinds: [1, 6, 20, 30023, 30311], authors: chunk, limit, ...timeFilter }],
             { signal: abort },
           ),
         ),

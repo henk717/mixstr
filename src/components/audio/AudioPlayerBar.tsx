@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Play,
   Pause,
@@ -9,11 +10,12 @@ import {
   ListMusic,
   X,
   Music,
+  ExternalLink,
 } from 'lucide-react';
 import { useMixstr } from '@/hooks/useMixstr';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
-import { extractVideos } from '@/lib/postUtils';
+import { eventToNevent, extractVideos } from '@/lib/postUtils';
 
 function formatTime(seconds: number): string {
   if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
@@ -23,6 +25,7 @@ function formatTime(seconds: number): string {
 }
 
 export function AudioPlayerBar() {
+  const navigate = useNavigate();
   const {
     currentTrack,
     isPlaying,
@@ -35,6 +38,7 @@ export function AudioPlayerBar() {
     audioDuration,
     setAudioDuration,
     audioQueue,
+    playTrack,
   } = useMixstr();
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -43,6 +47,7 @@ export function AudioPlayerBar() {
   const [muted, setMuted] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
 
+  // Is the current track a video file?
   const isVideo = currentTrack
     ? extractVideos(currentTrack.event).length > 0 &&
       /\.(mp4|webm|mov)/i.test(currentTrack.url)
@@ -69,10 +74,10 @@ export function AudioPlayerBar() {
     el.muted = muted;
     el.load();
     if (isPlaying) el.play().catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTrack?.url]);
 
-  // Volume
+  // Volume sync
   useEffect(() => {
     const el = isVideo ? videoRef.current : audioRef.current;
     if (el) {
@@ -92,21 +97,16 @@ export function AudioPlayerBar() {
     setAudioProgress(pct);
   };
 
+  const handleArtClick = () => {
+    // Navigate to the event's detail page
+    const nevent = eventToNevent(currentTrack.event);
+    navigate(`/${nevent}`);
+  };
+
   return (
     <>
-      {/* Hidden media element */}
-      {isVideo ? (
-        <video
-          ref={videoRef}
-          className="hidden"
-          onTimeUpdate={() => {
-            const el = videoRef.current;
-            if (el && el.duration) setAudioProgress(el.currentTime / el.duration);
-          }}
-          onDurationChange={() => setAudioDuration(videoRef.current?.duration ?? 0)}
-          onEnded={playNext}
-        />
-      ) : (
+      {/* Hidden audio element */}
+      {!isVideo && (
         <audio
           ref={audioRef}
           className="hidden"
@@ -119,23 +119,38 @@ export function AudioPlayerBar() {
         />
       )}
 
+      {/* Hidden video element for audio playback of video files */}
+      {isVideo && (
+        <video
+          ref={videoRef}
+          className="hidden"
+          onTimeUpdate={() => {
+            const el = videoRef.current;
+            if (el && el.duration) setAudioProgress(el.currentTime / el.duration);
+          }}
+          onDurationChange={() => setAudioDuration(videoRef.current?.duration ?? 0)}
+          onEnded={playNext}
+        />
+      )}
+
       {/* Player UI */}
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-card/95 backdrop-blur border-t border-border">
         {/* Queue panel */}
         {showQueue && (
-          <div className="border-b border-border max-h-48 overflow-y-auto">
-            <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              Queue ({audioQueue.length})
+          <div className="border-b border-border max-h-52 overflow-y-auto">
+            <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center justify-between">
+              <span>Queue ({audioQueue.length})</span>
             </div>
             {audioQueue.map((track, i) => (
               <div
                 key={track.event.id}
                 className={cn(
-                  'flex items-center gap-3 px-4 py-2 text-sm hover:bg-accent/30 transition-colors',
+                  'flex items-center gap-3 px-4 py-2 text-sm hover:bg-accent/30 transition-colors cursor-pointer',
                   currentTrack?.event.id === track.event.id && 'text-primary bg-primary/10',
                 )}
+                onClick={() => playTrack(track)}
               >
-                <span className="text-xs text-muted-foreground w-4">{i + 1}</span>
+                <span className="text-xs text-muted-foreground w-4 flex-shrink-0">{i + 1}</span>
                 <div className="w-8 h-8 rounded bg-muted flex-shrink-0 overflow-hidden">
                   {track.artwork ? (
                     <img src={track.artwork} alt="" className="w-full h-full object-cover" />
@@ -154,16 +169,22 @@ export function AudioPlayerBar() {
           </div>
         )}
 
-        <div className="px-4 py-3 flex items-center gap-4">
-          {/* Album art / video */}
-          <div className="w-12 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0">
-            {isVideo && currentTrack ? (
+        <div className="px-4 py-3 flex items-center gap-3 md:gap-4">
+          {/* Album art / video preview — clickable to go to event page */}
+          <div
+            className="relative w-12 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0 cursor-pointer group/art"
+            onClick={handleArtClick}
+            title="Open post"
+          >
+            {isVideo ? (
+              /* For video tracks: show a still frame from the video */
               <video
-                className="w-full h-full object-cover"
                 src={currentTrack.url}
+                className="w-full h-full object-cover"
                 muted
+                preload="metadata"
               />
-            ) : currentTrack?.artwork ? (
+            ) : currentTrack.artwork ? (
               <img
                 src={currentTrack.artwork}
                 alt=""
@@ -174,21 +195,28 @@ export function AudioPlayerBar() {
                 <Music size={18} className="text-muted-foreground" />
               </div>
             )}
+            {/* Hover overlay: go to page icon */}
+            <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover/art:opacity-100 transition-opacity">
+              <ExternalLink size={14} className="text-white" />
+            </div>
           </div>
 
           {/* Track info */}
-          <div className="min-w-0 w-32 md:w-48 flex-shrink-0">
-            <p className="text-sm font-semibold text-foreground truncate">
-              {currentTrack?.title ?? 'Unknown'}
+          <div className="min-w-0 w-28 sm:w-40 md:w-48 flex-shrink-0">
+            <p
+              className="text-sm font-semibold text-foreground truncate cursor-pointer hover:text-primary transition-colors"
+              onClick={handleArtClick}
+            >
+              {currentTrack.title ?? 'Unknown'}
             </p>
             <p className="text-xs text-muted-foreground truncate">
-              {currentTrack?.artist ?? ''}
+              {currentTrack.artist ?? ''}
             </p>
           </div>
 
-          {/* Controls - center */}
+          {/* Playback controls (center) */}
           <div className="flex-1 flex flex-col items-center gap-1 min-w-0">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 md:gap-4">
               <button
                 onClick={playPrev}
                 className="text-muted-foreground hover:text-foreground transition-colors"
@@ -197,9 +225,12 @@ export function AudioPlayerBar() {
               </button>
               <button
                 onClick={togglePlay}
-                className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors"
+                className="w-9 h-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 transition-colors flex-shrink-0"
               >
-                {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
+                {isPlaying
+                  ? <Pause size={16} fill="currentColor" />
+                  : <Play size={16} fill="currentColor" className="ml-0.5" />
+                }
               </button>
               <button
                 onClick={playNext}
@@ -210,7 +241,7 @@ export function AudioPlayerBar() {
             </div>
 
             {/* Progress bar */}
-            <div className="flex items-center gap-2 w-full max-w-md">
+            <div className="flex items-center gap-2 w-full max-w-sm md:max-w-md">
               <span className="text-xs text-muted-foreground w-8 text-right flex-shrink-0">
                 {formatTime(audioProgress * audioDuration)}
               </span>

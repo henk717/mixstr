@@ -13,7 +13,7 @@ export function extractImages(event: NostrEvent): string[] {
   }
 
   // From content regex
-  const imgRegex = /https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|avif)(?:\?\S*)?/gi;
+  const imgRegex = /https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|avif)(?:[?#]\S*)?/gi;
   const matches = event.content.match(imgRegex) ?? [];
   for (const m of matches) {
     if (!urls.includes(m)) urls.push(m);
@@ -22,7 +22,7 @@ export function extractImages(event: NostrEvent): string[] {
   return urls;
 }
 
-/** Extract video URLs */
+/** Extract direct video file URLs */
 export function extractVideos(event: NostrEvent): string[] {
   const urls: string[] = [];
 
@@ -34,12 +34,16 @@ export function extractVideos(event: NostrEvent): string[] {
         if (/\.(mp4|webm|mov|avi|mkv)/i.test(u)) urls.push(u);
       }
     }
-    if (tag[0] === 'url' && /\.(mp4|webm|mov)/i.test(tag[1])) {
-      urls.push(tag[1]);
+    if (tag[0] === 'url' && /\.(mp4|webm|mov|avi|mkv)/i.test(tag[1])) {
+      if (!urls.includes(tag[1])) urls.push(tag[1]);
+    }
+    // NIP-53 streaming tag
+    if (tag[0] === 'streaming' && /\.(mp4|webm|mov)/i.test(tag[1])) {
+      if (!urls.includes(tag[1])) urls.push(tag[1]);
     }
   }
 
-  const vidRegex = /https?:\/\/\S+\.(?:mp4|webm|mov)(?:\?\S*)?/gi;
+  const vidRegex = /https?:\/\/\S+\.(?:mp4|webm|mov)(?:[?#]\S*)?/gi;
   const matches = event.content.match(vidRegex) ?? [];
   for (const m of matches) {
     if (!urls.includes(m)) urls.push(m);
@@ -61,11 +65,15 @@ export function extractAudio(event: NostrEvent): string[] {
       }
     }
     if (tag[0] === 'url' && /\.(mp3|ogg|wav|flac|aac|opus|m4a)/i.test(tag[1])) {
-      urls.push(tag[1]);
+      if (!urls.includes(tag[1])) urls.push(tag[1]);
+    }
+    // kind 31337 streaming tag
+    if (tag[0] === 'streaming' && /\.(mp3|ogg|aac|opus|m4a)/i.test(tag[1])) {
+      if (!urls.includes(tag[1])) urls.push(tag[1]);
     }
   }
 
-  const audioRegex = /https?:\/\/\S+\.(?:mp3|ogg|wav|flac|aac|opus|m4a)(?:\?\S*)?/gi;
+  const audioRegex = /https?:\/\/\S+\.(?:mp3|ogg|wav|flac|aac|opus|m4a)(?:[?#]\S*)?/gi;
   const matches = event.content.match(audioRegex) ?? [];
   for (const m of matches) {
     if (!urls.includes(m)) urls.push(m);
@@ -74,19 +82,120 @@ export function extractAudio(event: NostrEvent): string[] {
   return urls;
 }
 
+export type ExternalEmbedType = 'youtube' | 'twitch' | 'spotify' | 'soundcloud' | 'other';
+
+export interface ExternalEmbed {
+  type: ExternalEmbedType;
+  url: string;
+  /** Embed-friendly iframe src */
+  embedUrl: string;
+  /** Human label */
+  label: string;
+  /** Thumbnail URL if known */
+  thumbnail?: string;
+}
+
+/**
+ * Extract external embeds (YouTube, Twitch, Spotify, SoundCloud, etc.)
+ * from event content URLs.
+ */
+export function extractExternalEmbeds(event: NostrEvent): ExternalEmbed[] {
+  const embeds: ExternalEmbed[] = [];
+  const seen = new Set<string>();
+
+  const allUrls = [
+    ...(event.content.match(/https?:\/\/[^\s<>"]+/g) ?? []),
+    ...event.tags.filter(([t]) => t === 'url').map(([, u]) => u),
+  ];
+
+  for (const url of allUrls) {
+    if (seen.has(url)) continue;
+
+    // YouTube
+    const ytMatch = url.match(
+      /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
+    );
+    if (ytMatch) {
+      seen.add(url);
+      embeds.push({
+        type: 'youtube',
+        url,
+        embedUrl: `https://www.youtube-nocookie.com/embed/${ytMatch[1]}`,
+        label: 'YouTube',
+        thumbnail: `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`,
+      });
+      continue;
+    }
+
+    // Twitch clip
+    const twitchClip = url.match(/twitch\.tv\/\w+\/clip\/(\w+)/);
+    if (twitchClip) {
+      seen.add(url);
+      embeds.push({
+        type: 'twitch',
+        url,
+        embedUrl: `https://clips.twitch.tv/embed?clip=${twitchClip[1]}&parent=${window.location.hostname}`,
+        label: 'Twitch Clip',
+      });
+      continue;
+    }
+
+    // Twitch stream
+    const twitchStream = url.match(/twitch\.tv\/(\w+)(?:$|[^/])/);
+    if (twitchStream && !url.includes('/clip/') && !url.includes('/videos/')) {
+      seen.add(url);
+      embeds.push({
+        type: 'twitch',
+        url,
+        embedUrl: `https://player.twitch.tv/?channel=${twitchStream[1]}&parent=${window.location.hostname}`,
+        label: 'Twitch Stream',
+      });
+      continue;
+    }
+
+    // Spotify
+    const spotifyMatch = url.match(/open\.spotify\.com\/(track|album|playlist|episode)\/([A-Za-z0-9]+)/);
+    if (spotifyMatch) {
+      seen.add(url);
+      embeds.push({
+        type: 'spotify',
+        url,
+        embedUrl: `https://open.spotify.com/embed/${spotifyMatch[1]}/${spotifyMatch[2]}`,
+        label: `Spotify ${spotifyMatch[1]}`,
+      });
+      continue;
+    }
+
+    // SoundCloud
+    if (url.includes('soundcloud.com/') && !url.includes('api.soundcloud')) {
+      seen.add(url);
+      embeds.push({
+        type: 'soundcloud',
+        url,
+        embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%23ff5500&auto_play=false`,
+        label: 'SoundCloud',
+      });
+      continue;
+    }
+  }
+
+  return embeds;
+}
+
 /** Get event title from tags */
 export function getEventTitle(event: NostrEvent): string | undefined {
   return (
     event.tags.find(([t]) => t === 'title')?.[1] ||
     event.tags.find(([t]) => t === 'subject')?.[1]
-  );
+  ) || undefined;
 }
 
-/** Get cover image from event tags (used for long-form) */
+/** Get cover image from event tags */
 export function getCoverImage(event: NostrEvent): string | undefined {
   return (
     event.tags.find(([t]) => t === 'image')?.[1] ||
     event.tags.find(([t]) => t === 'thumb')?.[1] ||
+    event.tags.find(([t]) => t === 'thumbnail')?.[1] ||
     extractImages(event)[0]
   );
 }
@@ -99,7 +208,7 @@ export function getSummary(event: NostrEvent): string | undefined {
 /** Strip media URLs from content for text-only display */
 export function stripMediaUrls(content: string): string {
   return content
-    .replace(/https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|avif|mp4|webm|mov|mp3|ogg|wav|flac|aac|opus|m4a)(?:\?\S*)?/gi, '')
+    .replace(/https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|avif|mp4|webm|mov|mp3|ogg|wav|flac|aac|opus|m4a)(?:[?#]\S*)?/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -115,7 +224,7 @@ export function relativeTime(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString();
 }
 
-/** Check if event is a reply (has 'e' tag with 'reply' or 'root' marker) */
+/** Check if event is a reply (has 'e' tag) */
 export function isReply(event: NostrEvent): boolean {
   return event.tags.some(([t]) => t === 'e');
 }
@@ -130,25 +239,93 @@ export function isLongform(event: NostrEvent): boolean {
   return event.kind === 30023;
 }
 
-/** Check if event has media */
+/** Check if event is a livestream (NIP-53 kind 30311) */
+export function isLivestream(event: NostrEvent): boolean {
+  return event.kind === 30311;
+}
+
+/** Get livestream info from kind 30311 */
+export function getLivestreamInfo(event: NostrEvent): {
+  title: string;
+  status: 'live' | 'ended' | 'planned';
+  streamUrl?: string;
+  viewers?: number;
+  thumbnail?: string;
+} | null {
+  if (event.kind !== 30311) return null;
+  const title = getEventTitle(event) || 'Live Stream';
+  const status = (event.tags.find(([t]) => t === 'status')?.[1] ?? 'live') as 'live' | 'ended' | 'planned';
+  const streamUrl =
+    event.tags.find(([t]) => t === 'streaming')?.[1] ||
+    event.tags.find(([t]) => t === 'recording')?.[1];
+  const viewersStr = event.tags.find(([t]) => t === 'current_participants')?.[1];
+  const viewers = viewersStr ? parseInt(viewersStr, 10) : undefined;
+  const thumbnail = getCoverImage(event);
+  return { title, status, streamUrl, viewers, thumbnail };
+}
+
+/** Check if event has displayable media (images or videos) */
 export function hasMedia(event: NostrEvent): boolean {
-  return extractImages(event).length > 0 || extractVideos(event).length > 0;
+  return (
+    extractImages(event).length > 0 ||
+    extractVideos(event).length > 0 ||
+    extractExternalEmbeds(event).length > 0 ||
+    event.kind === 20 ||   // NIP-68 picture
+    event.kind === 34235   // NIP-71 video
+  );
 }
 
-/** Check if event has audio */
+/**
+ * Check if event is audio-eligible: true audio files, video files (treat as
+ * audio with video thumbnail), kind 31337 audio tracks, or kind 34236.
+ */
 export function hasAudio(event: NostrEvent): boolean {
-  return extractAudio(event).length > 0 || event.kind === 31337;
+  return (
+    extractAudio(event).length > 0 ||
+    extractVideos(event).length > 0 ||      // videos are audio-eligible
+    event.kind === 31337 ||
+    event.kind === 34236
+  );
 }
 
-/** Get track info from kind 31337 (audio) event */
-export function getAudioTrackInfo(event: NostrEvent): { title: string; url: string; artist?: string; artwork?: string } | null {
-  const title = getEventTitle(event) || 'Untitled Track';
+/** Get track info for the audio player from any event */
+export function getAudioTrackInfo(event: NostrEvent): {
+  title: string;
+  url: string;
+  artist?: string;
+  artwork?: string;
+  isVideo?: boolean;
+} | null {
+  const title = getEventTitle(event) ||
+    event.content.slice(0, 60).trim() ||
+    'Untitled Track';
+
+  // Prefer audio URL, fall back to video URL
+  const audioUrl = extractAudio(event)[0];
+  const videoUrl = extractVideos(event)[0];
   const url =
     event.tags.find(([t]) => t === 'streaming')?.[1] ||
-    event.tags.find(([t]) => t === 'url')?.[1] ||
-    extractAudio(event)[0];
+    audioUrl ||
+    videoUrl;
+
   if (!url) return null;
+
+  const isVideo = !audioUrl && !!videoUrl;
   const artist = event.tags.find(([t]) => t === 'artist')?.[1];
   const artwork = getCoverImage(event);
-  return { title, url, artist, artwork };
+  return { title, url, artist, artwork, isVideo };
+}
+
+/** Encode an event to a nevent nip19 identifier for navigation */
+export function eventToNevent(event: NostrEvent): string {
+  try {
+    const { nip19 } = require('nostr-tools') as typeof import('nostr-tools');
+    return nip19.neventEncode({
+      id: event.id,
+      author: event.pubkey,
+      kind: event.kind,
+    });
+  } catch {
+    return event.id;
+  }
 }

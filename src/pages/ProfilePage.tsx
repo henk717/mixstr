@@ -43,7 +43,7 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
       const until = pageParam as number | undefined;
       const timeFilter = until ? { until } : {};
       return nostr.query(
-        [{ kinds: [1, 6, 20, 30023], authors: [pubkey], limit: PAGE_SIZE, ...timeFilter }],
+        [{ kinds: [1, 6, 20, 30023, 30311, 31337, 34235], authors: [pubkey], limit: PAGE_SIZE, ...timeFilter }],
         { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
       );
     },

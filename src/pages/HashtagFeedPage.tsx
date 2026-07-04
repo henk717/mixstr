@@ -33,7 +33,7 @@ export function HashtagFeedPage() {
       const until = pageParam as number | undefined;
       const timeFilter = until ? { until } : {};
       return nostr.query(
-        [{ kinds: [1, 30023], '#t': [tag], limit: PAGE_SIZE, ...timeFilter }],
+        [{ kinds: [1, 30023, 30311], '#t': [tag], limit: PAGE_SIZE, ...timeFilter }],
         { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
       );
     },

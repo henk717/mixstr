@@ -26,7 +26,7 @@ export function useFollowingFeed() {
       const results = await Promise.all(
         chunks.map((batch) =>
           nostr.query(
-            [{ kinds: [1, 6, 20, 30023, 31337, 34235, 34236], authors: batch, limit: PAGE_SIZE, ...timeFilter }],
+            [{ kinds: [1, 6, 20, 30023, 30311, 31337, 34235, 34236], authors: batch, limit: PAGE_SIZE, ...timeFilter }],
             { signal: abort },
           ),
         ),

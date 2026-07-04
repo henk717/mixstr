@@ -1,44 +1,79 @@
+import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Play, Image } from 'lucide-react';
+import { Play, Image, Plus, Wifi } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
 import {
   extractImages,
   extractVideos,
+  extractExternalEmbeds,
   getEventTitle,
+  getLivestreamInfo,
+  isLivestream,
   relativeTime,
+  eventToNevent,
+  getAudioTrackInfo,
 } from '@/lib/postUtils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useMixstr } from '@/hooks/useMixstr';
+import type { AudioTrack } from '@/contexts/MixstrContext';
 
 interface MediaCardProps {
   event: NostrEvent;
-  onClick?: () => void;
 }
 
-export function MediaCard({ event, onClick }: MediaCardProps) {
+export function MediaCard({ event }: MediaCardProps) {
+  const navigate = useNavigate();
   const author = useAuthor(event.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(event.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
+  const { addToQueue } = useMixstr();
 
   const images = extractImages(event);
   const videos = extractVideos(event);
-  const title = getEventTitle(event) ?? event.content.slice(0, 80).trim();
+  const embeds = extractExternalEmbeds(event);
+  const livestream = isLivestream(event) ? getLivestreamInfo(event) : null;
   const isVideo = videos.length > 0;
-  const thumbnail = isVideo
-    ? images[0] // poster frame
-    : images[0];
+  const isEmbed = embeds.length > 0 && !isVideo;
+  const embed = embeds[0];
+  const title = getEventTitle(event) ?? event.content.slice(0, 80).trim();
 
-  if (!thumbnail && !isVideo) return null;
+  // Choose thumbnail
+  const thumbnail = embed?.thumbnail ?? images[0];
+  const nevent = eventToNevent(event);
+
+  // Nothing displayable
+  if (!thumbnail && !isVideo && !isEmbed && !livestream) return null;
+
+  const handleCardClick = () => {
+    navigate(`/${nevent}`);
+  };
+
+  const handleAddToQueue = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const trackInfo = getAudioTrackInfo(event);
+    if (!trackInfo) return;
+    const track: AudioTrack = {
+      event,
+      title: trackInfo.title,
+      url: trackInfo.url,
+      artist: displayName,
+      artwork: thumbnail,
+    };
+    addToQueue(track);
+  };
+
+  const hasQueueable = videos.length > 0;
 
   return (
     <div
       className="group cursor-pointer rounded-xl overflow-hidden bg-card border border-border hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/10"
-      onClick={onClick}
+      onClick={handleCardClick}
     >
-      {/* Thumbnail */}
+      {/* Thumbnail area */}
       <div className="relative aspect-video bg-black overflow-hidden">
         {thumbnail ? (
           <img
@@ -53,29 +88,50 @@ export function MediaCard({ event, onClick }: MediaCardProps) {
           </div>
         )}
 
-        {/* Play overlay for videos */}
-        {isVideo && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/30 transition-colors">
-            <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+        {/* Play overlay */}
+        {(isVideo || isEmbed) && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35 transition-colors">
+            <div className="w-12 h-12 rounded-full bg-black/70 flex items-center justify-center">
               <Play size={20} className="text-white ml-0.5" fill="white" />
             </div>
           </div>
         )}
 
-        {/* Duration badge placeholder */}
-        {isVideo && (
+        {/* Live badge */}
+        {livestream?.status === 'live' && (
+          <div className="absolute top-2 left-2 flex items-center gap-1 bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+            <Wifi size={10} className="animate-pulse" />
+            LIVE
+          </div>
+        )}
+
+        {/* Source badge */}
+        {isEmbed && embed && (
+          <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded capitalize">
+            {embed.type}
+          </div>
+        )}
+        {isVideo && !isEmbed && (
           <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
             video
           </div>
         )}
+
+        {/* Add to queue button for videos */}
+        {hasQueueable && (
+          <button
+            onClick={handleAddToQueue}
+            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/70 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary"
+            title="Add to audio queue"
+          >
+            <Plus size={14} />
+          </button>
+        )}
       </div>
 
-      {/* Info */}
+      {/* Info row */}
       <div className="p-3 flex gap-2">
-        <Link
-          to={`/${npub}`}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <Link to={`/${npub}`} onClick={(e) => e.stopPropagation()}>
           <Avatar className="w-8 h-8 flex-shrink-0 mt-0.5">
             <AvatarImage src={meta?.picture} />
             <AvatarFallback className="text-xs bg-primary/20 text-primary font-bold">
@@ -88,7 +144,12 @@ export function MediaCard({ event, onClick }: MediaCardProps) {
             {title || 'Untitled'}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5 truncate">{displayName}</p>
-          <p className="text-xs text-muted-foreground">{relativeTime(event.created_at)}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-muted-foreground">{relativeTime(event.created_at)}</p>
+            {livestream?.viewers != null && (
+              <p className="text-xs text-red-400">{livestream.viewers} watching</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
