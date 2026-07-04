@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useSeoMeta } from '@unhead/react';
-import { RefreshCw, Settings2, Pencil } from 'lucide-react';
+import { RefreshCw, Pencil, CloudOff } from 'lucide-react';
 import { useMixstr } from '@/hooks/useMixstr';
 import { useListFeed } from '@/hooks/useListFeed';
 import { FeedView } from '@/components/feed/FeedView';
@@ -23,9 +24,16 @@ export function ListFeedPage() {
 
   useSeoMeta({ title: `${list?.label ?? 'Feed'} · Mixstr` });
 
-  const { data: events = [], isLoading, refetch } = useListFeed(
-    list ?? { id: '', label: '', icon: 'hash', sources: [], createdAt: 0 },
-  );
+  const {
+    data,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useListFeed(list ?? { id: '', label: '', icon: 'hash', sources: [], createdAt: 0 });
+
+  const pages = useMemo(() => data?.pages ?? [], [data]);
 
   if (!list) {
     return (
@@ -86,7 +94,14 @@ export function ListFeedPage() {
         </div>
       </div>
 
-      <FeedView events={events} mode={mode} isLoading={isLoading} />
+      <FeedView
+        pages={pages}
+        mode={mode}
+        isLoading={isLoading}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        fetchNextPage={fetchNextPage}
+      />
 
       <EditListDialog
         open={editOpen}

@@ -1,22 +1,25 @@
+import { useMemo } from 'react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import type { FeedViewMode } from '@/contexts/MixstrContext';
 import { ShortPostCard } from './ShortPostCard';
 import { LongPostCard } from './LongPostCard';
 import { MediaCard } from './MediaCard';
 import { AudioCard } from './AudioCard';
+import { InfiniteScrollSentinel } from './InfiniteScrollSentinel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  extractImages,
-  extractVideos,
-  hasAudio,
-  hasMedia,
-} from '@/lib/postUtils';
+import { hasAudio, hasMedia } from '@/lib/postUtils';
 
 interface FeedViewProps {
-  events: NostrEvent[];
+  /** Flat list of events (for non-paginated use) */
+  events?: NostrEvent[];
+  /** Pages of events from useInfiniteQuery */
+  pages?: NostrEvent[][];
   mode: FeedViewMode;
   isLoading?: boolean;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  fetchNextPage?: () => void;
 }
 
 function filterForMode(events: NostrEvent[], mode: FeedViewMode): NostrEvent[] {
@@ -32,19 +35,46 @@ function filterForMode(events: NostrEvent[], mode: FeedViewMode): NostrEvent[] {
   }
 }
 
-export function FeedView({ events, mode, isLoading }: FeedViewProps) {
-  if (isLoading) {
+export function FeedView({
+  events: flatEvents,
+  pages,
+  mode,
+  isLoading,
+  hasNextPage,
+  isFetchingNextPage,
+  fetchNextPage,
+}: FeedViewProps) {
+  // Merge flat events or pages into one deduplicated list
+  const allEvents = useMemo(() => {
+    let raw: NostrEvent[];
+    if (pages !== undefined) {
+      // pages is NostrEvent[][] from useInfiniteQuery
+      raw = pages.flatMap((p) => (Array.isArray(p) ? p : []));
+    } else {
+      raw = flatEvents ?? [];
+    }
+    const seen = new Set<string>();
+    return raw.filter((e) => {
+      if (!e?.id || seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
+  }, [pages, flatEvents]);
+
+  if (isLoading && allEvents.length === 0) {
     return <FeedSkeleton mode={mode} />;
   }
 
-  const filtered = filterForMode(events, mode);
+  const filtered = filterForMode(allEvents, mode);
+  const isPaginated = !!fetchNextPage;
+  const sentinelVariant = mode === 'media' ? 'grid' : mode === 'audio' ? 'audio' : 'list';
 
-  if (filtered.length === 0) {
+  if (filtered.length === 0 && !isLoading) {
     return (
       <Card className="border-dashed mx-4 my-8">
         <CardContent className="py-12 px-8 text-center">
           <p className="text-muted-foreground max-w-sm mx-auto text-sm">
-            {events.length === 0
+            {allEvents.length === 0
               ? 'No posts yet. Follow some people or wait for content to load.'
               : `No ${mode} content in your feed right now.`}
           </p>
@@ -55,10 +85,20 @@ export function FeedView({ events, mode, isLoading }: FeedViewProps) {
 
   if (mode === 'media') {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4">
-        {filtered.map((event) => (
-          <MediaCard key={event.id} event={event} />
-        ))}
+      <div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4">
+          {filtered.map((event) => (
+            <MediaCard key={event.id} event={event} />
+          ))}
+        </div>
+        {isPaginated && (
+          <InfiniteScrollSentinel
+            hasNextPage={hasNextPage ?? false}
+            isFetchingNextPage={isFetchingNextPage ?? false}
+            fetchNextPage={fetchNextPage!}
+            variant="grid"
+          />
+        )}
       </div>
     );
   }
@@ -69,6 +109,14 @@ export function FeedView({ events, mode, isLoading }: FeedViewProps) {
         {filtered.map((event) => (
           <AudioCard key={event.id} event={event} />
         ))}
+        {isPaginated && (
+          <InfiniteScrollSentinel
+            hasNextPage={hasNextPage ?? false}
+            isFetchingNextPage={isFetchingNextPage ?? false}
+            fetchNextPage={fetchNextPage!}
+            variant="audio"
+          />
+        )}
       </div>
     );
   }
@@ -79,6 +127,14 @@ export function FeedView({ events, mode, isLoading }: FeedViewProps) {
         {filtered.map((event) => (
           <LongPostCard key={event.id} event={event} />
         ))}
+        {isPaginated && (
+          <InfiniteScrollSentinel
+            hasNextPage={hasNextPage ?? false}
+            isFetchingNextPage={isFetchingNextPage ?? false}
+            fetchNextPage={fetchNextPage!}
+            variant="list"
+          />
+        )}
       </div>
     );
   }
@@ -89,6 +145,14 @@ export function FeedView({ events, mode, isLoading }: FeedViewProps) {
       {filtered.map((event) => (
         <ShortPostCard key={event.id} event={event} />
       ))}
+      {isPaginated && (
+        <InfiniteScrollSentinel
+          hasNextPage={hasNextPage ?? false}
+          isFetchingNextPage={isFetchingNextPage ?? false}
+          fetchNextPage={fetchNextPage!}
+          variant="list"
+        />
+      )}
     </div>
   );
 }

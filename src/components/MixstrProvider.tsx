@@ -1,10 +1,32 @@
-import { ReactNode, useCallback, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { MixstrContext, type AudioTrack, type FeedViewMode } from '@/contexts/MixstrContext';
 import {
   loadSidebarLists,
   saveSidebarLists,
   type SidebarList,
 } from '@/lib/sidebarLists';
+import { useMixstrSync, type MixstrConfig } from '@/hooks/useMixstrBackup';
+
+function MixstrSyncInner({
+  sidebarLists,
+  feedViewModes,
+  onRemoteLoaded,
+  onScheduleBackup,
+}: {
+  sidebarLists: SidebarList[];
+  feedViewModes: Record<string, FeedViewMode>;
+  onRemoteLoaded: (config: MixstrConfig) => void;
+  onScheduleBackup: (fn: () => void) => void;
+}) {
+  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, onRemoteLoaded });
+
+  // Expose scheduleBackup up to parent on each render
+  useEffect(() => {
+    onScheduleBackup(scheduleBackup);
+  });
+
+  return null;
+}
 
 export function MixstrProvider({ children }: { children: ReactNode }) {
   const [feedViewModes, setFeedViewModes] = useState<Record<string, FeedViewMode>>({});
@@ -15,21 +37,52 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const [audioProgress, setAudioProgress] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
   const currentIndexRef = useRef<number>(-1);
+  const scheduleBackupRef = useRef<() => void>(() => {});
 
   const setFeedViewMode = useCallback((feedKey: string, mode: FeedViewMode) => {
-    setFeedViewModes((prev) => ({ ...prev, [feedKey]: mode }));
+    setFeedViewModes((prev) => {
+      const next = { ...prev, [feedKey]: mode };
+      // Schedule a backup whenever view mode changes
+      setTimeout(() => scheduleBackupRef.current(), 0);
+      return next;
+    });
+  }, []);
+
+  // Called when the remote Nostr config is fetched and newer than local
+  const handleRemoteLoaded = useCallback((config: MixstrConfig) => {
+    setSidebarListsState((local) => {
+      // Only override if the remote savedAt is more recent than local createdAt heuristic
+      const remoteTs = config.savedAt ?? 0;
+      const localMaxTs = Math.max(...local.map((l) => l.createdAt ?? 0), 0);
+      if (remoteTs > localMaxTs) {
+        saveSidebarLists(config.sidebarLists);
+        return config.sidebarLists;
+      }
+      return local;
+    });
+    setFeedViewModes((local) => {
+      const remoteTs = config.savedAt ?? 0;
+      // Simple heuristic: only override if remote was saved after any local timestamp
+      // Use the remote view modes only if we have nothing local
+      if (Object.keys(local).length === 0 && remoteTs > 0) {
+        return config.feedViewModes ?? local;
+      }
+      return local;
+    });
   }, []);
 
   // Sidebar list management
   const setSidebarLists = useCallback((lists: SidebarList[]) => {
     setSidebarListsState(lists);
     saveSidebarLists(lists);
+    setTimeout(() => scheduleBackupRef.current(), 0);
   }, []);
 
   const addSidebarList = useCallback((list: SidebarList) => {
     setSidebarListsState((prev) => {
       const next = [...prev, list];
       saveSidebarLists(next);
+      setTimeout(() => scheduleBackupRef.current(), 0);
       return next;
     });
   }, []);
@@ -38,6 +91,7 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     setSidebarListsState((prev) => {
       const next = prev.map((l) => (l.id === id ? { ...l, ...patch } : l));
       saveSidebarLists(next);
+      setTimeout(() => scheduleBackupRef.current(), 0);
       return next;
     });
   }, []);
@@ -46,6 +100,7 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     setSidebarListsState((prev) => {
       const next = prev.filter((l) => l.id !== id);
       saveSidebarLists(next);
+      setTimeout(() => scheduleBackupRef.current(), 0);
       return next;
     });
   }, []);
@@ -138,6 +193,13 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
         setAudioDuration,
       }}
     >
+      {/* Sync component — rendered inside the provider so it can access Nostr hooks */}
+      <MixstrSyncInner
+        sidebarLists={sidebarLists}
+        feedViewModes={feedViewModes}
+        onRemoteLoaded={handleRemoteLoaded}
+        onScheduleBackup={(fn) => { scheduleBackupRef.current = fn; }}
+      />
       {children}
     </MixstrContext.Provider>
   );

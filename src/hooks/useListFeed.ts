@@ -1,10 +1,12 @@
 import { useNostr } from '@nostrify/react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useFollowing } from './useFollowing';
 import { useCurrentUser } from './useCurrentUser';
 import type { SidebarList, ListSource } from '@/lib/sidebarLists';
 import { nip19 } from 'nostr-tools';
+
+const PAGE_SIZE = 30;
 
 /** Decode npub/hex to hex pubkey */
 function toPubkeyHex(value: string): string {
@@ -18,21 +20,24 @@ function toPubkeyHex(value: string): string {
 }
 
 /**
- * Fetches and merges events for all sources in a SidebarList.
- * Falls back to returning [] for source types not yet implemented.
+ * Infinite-scroll feed for a SidebarList.
+ * Uses timestamp-based pagination (until cursor) per Nostr convention.
  */
-export function useListFeed(list: SidebarList, limit = 50) {
+export function useListFeed(list: SidebarList) {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const { data: myFollowing = [] } = useFollowing();
 
-  return useQuery<NostrEvent[]>({
-    queryKey: ['nostr', 'list-feed', list.id, list.sources.map((s) => s.id).join(',')],
-    queryFn: async ({ signal }) => {
+  return useInfiniteQuery<NostrEvent[]>({
+    queryKey: ['nostr', 'list-feed-infinite', list.id, list.sources.map((s) => s.id).join(',')],
+    queryFn: async ({ pageParam, signal }) => {
+      const until = pageParam as number | undefined;
       const abort = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
 
       const batches = await Promise.allSettled(
-        list.sources.map((source) => fetchSource(source, { nostr, myFollowing, user, abort, limit })),
+        list.sources.map((source) =>
+          fetchSource(source, { nostr, myFollowing, user, abort, limit: PAGE_SIZE, until }),
+        ),
       );
 
       const all: NostrEvent[] = [];
@@ -51,8 +56,14 @@ export function useListFeed(list: SidebarList, limit = 50) {
 
       return all
         .sort((a, b) => b.created_at - a.created_at)
-        .slice(0, limit);
+        .slice(0, PAGE_SIZE);
     },
+    getNextPageParam: (lastPage) => {
+      if (lastPage.length < PAGE_SIZE) return undefined;
+      // Use oldest event's timestamp minus 1 as next "until" cursor
+      return lastPage[lastPage.length - 1].created_at - 1;
+    },
+    initialPageParam: undefined as number | undefined,
     enabled: list.sources.length > 0,
     staleTime: 30 * 1000,
   });
@@ -66,15 +77,18 @@ async function fetchSource(
     user: ReturnType<typeof useCurrentUser>['user'];
     abort: AbortSignal;
     limit: number;
+    until?: number;
   },
 ): Promise<NostrEvent[]> {
-  const { nostr, myFollowing, user, abort, limit } = ctx;
+  const { nostr, myFollowing, user, abort, limit, until } = ctx;
+
+  const timeFilter = until ? { until } : {};
 
   switch (source.type) {
     case 'hashtag': {
       if (!source.tag) return [];
       return nostr.query(
-        [{ kinds: [1, 30023], '#t': [source.tag], limit }],
+        [{ kinds: [1, 30023], '#t': [source.tag], limit, ...timeFilter }],
         { signal: abort },
       );
     }
@@ -83,13 +97,12 @@ async function fetchSource(
       const pubkeys = (source.pubkeys ?? []).map(toPubkeyHex).filter(Boolean);
       if (pubkeys.length === 0) return [];
       return nostr.query(
-        [{ kinds: [1, 6, 20, 30023], authors: pubkeys, limit }],
+        [{ kinds: [1, 6, 20, 30023], authors: pubkeys, limit, ...timeFilter }],
         { signal: abort },
       );
     }
 
     case 'follow-list': {
-      // "following" source means use MY own contact list
       const isMyFollowing =
         !source.followListPubkey ||
         source.followListPubkey === user?.pubkey;
@@ -100,7 +113,6 @@ async function fetchSource(
 
       if (authors.length === 0) return [];
 
-      // Batch queries for large follow lists
       const chunks: string[][] = [];
       for (let i = 0; i < authors.length; i += 500) {
         chunks.push(authors.slice(i, i + 500));
@@ -108,7 +120,7 @@ async function fetchSource(
       const results = await Promise.all(
         chunks.map((chunk) =>
           nostr.query(
-            [{ kinds: [1, 6, 20, 30023], authors: chunk, limit }],
+            [{ kinds: [1, 6, 20, 30023], authors: chunk, limit, ...timeFilter }],
             { signal: abort },
           ),
         ),
@@ -118,13 +130,10 @@ async function fetchSource(
 
     case 'community': {
       if (!source.communityId) return [];
-      // NIP-72: fetch approved posts (kind 4550) and the posts themselves
-      // Also query kind 1111 (NIP-22 community posts)
-      const communityAddr = source.communityId;
       return nostr.query(
         [
-          { kinds: [1111], '#A': [communityAddr], limit },
-          { kinds: [4550], '#a': [communityAddr], limit },
+          { kinds: [1111], '#A': [source.communityId], limit, ...timeFilter },
+          { kinds: [4550], '#a': [source.communityId], limit, ...timeFilter },
         ],
         { signal: abort },
       );
@@ -132,26 +141,15 @@ async function fetchSource(
 
     case 'group': {
       if (!source.groupId) return [];
-      // NIP-29: posts tagged with 'h' = group id
       return nostr.query(
-        [{ kinds: [1, 9, 11], '#h': [source.groupId], limit }],
+        [{ kinds: [1, 9, 11], '#h': [source.groupId], limit, ...timeFilter }],
         { signal: abort },
       );
     }
 
     case 'rss':
-    case 'fediverse': {
-      // These are fetched client-side via CORS proxy
-      if (!source.url) return [];
-      // Return empty — these are handled by separate UI in the feed view
-      return [];
-    }
-
-    case 'dvm': {
-      // NIP-90 DVM: for now return empty — full implementation needs request/response flow
-      return [];
-    }
-
+    case 'fediverse':
+    case 'dvm':
     default:
       return [];
   }

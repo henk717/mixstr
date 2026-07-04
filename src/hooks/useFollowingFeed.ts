@@ -1,52 +1,38 @@
 import { useNostr } from '@nostrify/react';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useFollowing } from './useFollowing';
 
-export type FeedKindFilter = 'all' | 'short' | 'longform' | 'media' | 'audio';
+const PAGE_SIZE = 30;
 
-function kindsForFilter(filter: FeedKindFilter): number[] {
-  switch (filter) {
-    case 'short':
-      // short notes + reposts
-      return [1, 6];
-    case 'longform':
-      // kind 1 + long-form articles
-      return [1, 30023];
-    case 'media':
-      // kind 1 with media, video (kind 34235 NIP-71), image (kind 20)
-      return [1, 20, 34235];
-    case 'audio':
-      // kind 1 with audio, kind 31337 (audio track), kind 34236 (short video/audio)
-      return [1, 31337, 34236];
-    case 'all':
-    default:
-      return [1, 6, 20, 30023, 31337, 34235, 34236];
-  }
-}
-
-export function useFollowingFeed(authors: string[], limit = 50) {
+export function useFollowingFeed() {
   const { nostr } = useNostr();
+  const { data: following = [] } = useFollowing();
 
-  return useQuery<NostrEvent[]>({
-    queryKey: ['nostr', 'following-feed', authors.slice().sort().join(','), limit],
-    queryFn: async ({ signal }) => {
-      if (authors.length === 0) return [];
-      // Fetch in batches of 500 to avoid relay limits
-      const batches: string[][] = [];
-      for (let i = 0; i < authors.length; i += 500) {
-        batches.push(authors.slice(i, i + 500));
+  return useInfiniteQuery<NostrEvent[]>({
+    queryKey: ['nostr', 'following-feed-infinite', following.slice().sort().join(',')],
+    queryFn: async ({ pageParam, signal }) => {
+      if (following.length === 0) return [];
+      const until = pageParam as number | undefined;
+      const timeFilter = until ? { until } : {};
+      const abort = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
+
+      // Batch queries for large follow lists
+      const chunks: string[][] = [];
+      for (let i = 0; i < following.length; i += 500) {
+        chunks.push(following.slice(i, i + 500));
       }
+
       const results = await Promise.all(
-        batches.map((batch) =>
+        chunks.map((batch) =>
           nostr.query(
-            [{ kinds: [1, 6, 20, 30023, 31337, 34235, 34236], authors: batch, limit }],
-            { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+            [{ kinds: [1, 6, 20, 30023, 31337, 34235, 34236], authors: batch, limit: PAGE_SIZE, ...timeFilter }],
+            { signal: abort },
           ),
         ),
       );
+
       const all = results.flat();
-      // Sort by created_at desc, dedupe by id
       const seen = new Set<string>();
       return all
         .filter((e) => {
@@ -55,9 +41,14 @@ export function useFollowingFeed(authors: string[], limit = 50) {
           return true;
         })
         .sort((a, b) => b.created_at - a.created_at)
-        .slice(0, limit);
+        .slice(0, PAGE_SIZE);
     },
-    enabled: authors.length > 0,
+    getNextPageParam: (lastPage) => {
+      if (lastPage.length < PAGE_SIZE) return undefined;
+      return lastPage[lastPage.length - 1].created_at - 1;
+    },
+    initialPageParam: undefined as number | undefined,
+    enabled: following.length > 0,
     staleTime: 30 * 1000,
   });
 }

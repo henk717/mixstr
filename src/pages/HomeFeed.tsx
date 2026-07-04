@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFollowing } from '@/hooks/useFollowing';
@@ -7,7 +8,7 @@ import { FeedView } from '@/components/feed/FeedView';
 import { ViewModeSwitcher } from '@/components/feed/ViewModeSwitcher';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Feather } from 'lucide-react';
+import { RefreshCw, Feather, CloudOff } from 'lucide-react';
 
 const FEED_KEY = 'home';
 
@@ -16,10 +17,19 @@ export function HomeFeed() {
 
   const { user, metadata } = useCurrentUser();
   const { data: following = [], isLoading: followingLoading } = useFollowing();
-  const { data: events = [], isLoading: feedLoading, refetch } = useFollowingFeed(following);
-  const { feedViewModes, setFeedViewMode } = useMixstr();
+  const {
+    data,
+    isLoading: feedLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useFollowingFeed();
 
+  const { feedViewModes, setFeedViewMode } = useMixstr();
   const mode = feedViewModes[FEED_KEY] ?? 'short';
+  const pages = useMemo(() => data?.pages ?? [], [data]);
+  const isLoading = followingLoading || feedLoading;
 
   if (!user) {
     return (
@@ -37,25 +47,21 @@ export function HomeFeed() {
     );
   }
 
-  const isLoading = followingLoading || feedLoading;
-
   return (
     <div className="max-w-2xl mx-auto">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border">
         <div className="flex items-center justify-between px-4 py-3">
           <h1 className="text-lg font-bold text-foreground">Home</h1>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-8 h-8 text-muted-foreground hover:text-primary"
-              onClick={() => refetch()}
-              title="Refresh"
-            >
-              <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-8 h-8 text-muted-foreground hover:text-primary"
+            onClick={() => refetch()}
+            title="Refresh"
+          >
+            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+          </Button>
         </div>
         <div className="px-4 pb-3">
           <ViewModeSwitcher mode={mode} onChange={(m) => setFeedViewMode(FEED_KEY, m)} />
@@ -69,7 +75,7 @@ export function HomeFeed() {
             <img src={metadata.picture} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-primary text-xs font-bold">
-              {(metadata?.name ?? 'U')[0].toUpperCase()}
+              {(metadata?.name?.trim() || metadata?.display_name?.trim() || 'U')[0].toUpperCase()}
             </div>
           )}
         </div>
@@ -82,9 +88,15 @@ export function HomeFeed() {
       </div>
 
       {/* Feed */}
-      <FeedView events={events} mode={mode} isLoading={isLoading} />
+      <FeedView
+        pages={pages}
+        mode={mode}
+        isLoading={isLoading}
+        hasNextPage={hasNextPage}
+        isFetchingNextPage={isFetchingNextPage}
+        fetchNextPage={fetchNextPage}
+      />
 
-      {/* Following count info */}
       {!isLoading && following.length === 0 && (
         <div className="px-4 py-6 text-center text-sm text-muted-foreground">
           You're not following anyone yet. Find people to follow to populate your feed.
