@@ -1,6 +1,8 @@
 import { nip19 } from 'nostr-tools';
 import { useParams } from 'react-router-dom';
 import NotFound from './NotFound';
+import { MainLayout } from '@/components/layout/MainLayout';
+import { ProfilePage } from './ProfilePage';
 
 export function NIP19Page() {
   const { nip19: identifier } = useParams<{ nip19: string }>();
@@ -20,23 +22,28 @@ export function NIP19Page() {
 
   switch (type) {
     case 'npub':
-    case 'nprofile':
-      // AI agent should implement profile view here
-      return <div>Profile placeholder</div>;
+    case 'nprofile': {
+      const pubkey = type === 'npub' ? decoded.data : decoded.data.pubkey;
+      return (
+        <MainLayout>
+          <ProfilePage pubkey={pubkey} />
+        </MainLayout>
+      );
+    }
 
     case 'note':
-      // AI agent should implement note view here
-      return <div>Note placeholder</div>;
-
     case 'nevent':
-      // AI agent should implement event view here
-      return <div>Event placeholder</div>;
-
     case 'naddr':
-      // AI agent should implement addressable event view here
-      return <div>Addressable event placeholder</div>;
+      // TODO: implement event/article views
+      return (
+        <MainLayout>
+          <div className="max-w-2xl mx-auto px-4 py-8 text-muted-foreground text-center">
+            Event view coming soon.
+          </div>
+        </MainLayout>
+      );
 
     default:
       return <NotFound />;
   }
-} 
+}
