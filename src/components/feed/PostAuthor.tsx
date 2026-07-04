@@ -14,7 +14,8 @@ export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
   const author = useAuthor(pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(pubkey);
-  const displayName = meta?.display_name ?? meta?.name ?? pubkey.slice(0, 10) + '…';
+  const rawName = meta?.display_name || meta?.name || '';
+  const displayName = rawName.trim() || pubkey.slice(0, 10) + '…';
 
   if (compact) {
     return (

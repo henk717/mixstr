@@ -26,7 +26,8 @@ export function AudioCard({ event, onClick }: AudioCardProps) {
   const author = useAuthor(event.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(event.pubkey);
-  const displayName = meta?.display_name ?? meta?.name ?? event.pubkey.slice(0, 10) + '…';
+  const rawName = meta?.display_name || meta?.name || '';
+  const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
   const { playTrack, addToQueue } = useMixstr();
 
   const audioUrls = extractAudio(event);

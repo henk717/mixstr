@@ -34,7 +34,8 @@ function NotificationItem({ event }: { event: NostrEvent }) {
   const author = useAuthor(event.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(event.pubkey);
-  const displayName = meta?.display_name ?? meta?.name ?? event.pubkey.slice(0, 10) + '…';
+  const rawName = meta?.display_name || meta?.name || '';
+  const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
 
   return (
     <div className="flex items-start gap-3 px-4 py-4 border-b border-border hover:bg-accent/20 transition-colors">

@@ -220,7 +220,8 @@ function PendingPostsList({
 function PendingPostItem({ post, onApprove }: { post: NostrEvent; onApprove: () => void }) {
   const author = useAuthor(post.pubkey);
   const meta = author.data?.metadata;
-  const displayName = meta?.display_name ?? meta?.name ?? post.pubkey.slice(0, 10) + '…';
+  const rawName = meta?.display_name || meta?.name || '';
+  const displayName = rawName.trim() || post.pubkey.slice(0, 10) + '…';
 
   return (
     <div className="px-4 py-4 border-b border-border">
@@ -282,7 +283,8 @@ function ModeratorsList({ communityEvent }: { communityEvent: NostrEvent | undef
 function ModeratorItem({ pubkey, role }: { pubkey: string; role?: string }) {
   const author = useAuthor(pubkey);
   const meta = author.data?.metadata;
-  const displayName = meta?.display_name ?? meta?.name ?? pubkey.slice(0, 16) + '…';
+  const rawName = meta?.display_name || meta?.name || '';
+  const displayName = rawName.trim() || pubkey.slice(0, 16) + '…';
 
   return (
     <div className="flex items-center gap-3">

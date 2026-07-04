@@ -25,7 +25,8 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
     title: `${meta?.display_name ?? meta?.name ?? 'Profile'} · Mixstr`,
   });
 
-  const displayName = meta?.display_name ?? meta?.name ?? pubkey.slice(0, 16) + '…';
+  const rawName = meta?.display_name || meta?.name || '';
+  const displayName = rawName.trim() || pubkey.slice(0, 16) + '…';
 
   return (
     <div className="max-w-2xl mx-auto">
