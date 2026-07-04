@@ -1,5 +1,6 @@
 import { createContext } from 'react';
 import type { NostrEvent } from '@nostrify/nostrify';
+import type { SidebarList } from '@/lib/sidebarLists';
 
 export type FeedViewMode = 'short' | 'longform' | 'media' | 'audio';
 
@@ -16,6 +17,13 @@ export interface MixstrContextType {
   feedViewModes: Record<string, FeedViewMode>;
   setFeedViewMode: (feedKey: string, mode: FeedViewMode) => void;
 
+  /** Sidebar lists */
+  sidebarLists: SidebarList[];
+  setSidebarLists: (lists: SidebarList[]) => void;
+  addSidebarList: (list: SidebarList) => void;
+  updateSidebarList: (id: string, list: Partial<SidebarList>) => void;
+  removeSidebarList: (id: string) => void;
+
   /** Audio player queue */
   audioQueue: AudioTrack[];
   currentTrack: AudioTrack | null;
@@ -26,7 +34,7 @@ export interface MixstrContextType {
   playPrev: () => void;
   togglePlay: () => void;
   clearQueue: () => void;
-  audioProgress: number; // 0–1
+  audioProgress: number;
   setAudioProgress: (p: number) => void;
   audioDuration: number;
   setAudioDuration: (d: number) => void;

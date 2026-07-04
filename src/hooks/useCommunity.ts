@@ -1,0 +1,91 @@
+import { useNostr } from '@nostrify/react';
+import { useQuery } from '@tanstack/react-query';
+import type { NostrEvent } from '@nostrify/nostrify';
+import { useCurrentUser } from './useCurrentUser';
+
+/** Fetches community metadata (kind 34550) */
+export function useCommunityMeta(communityAddr: string) {
+  const { nostr } = useNostr();
+  // communityAddr = "34550:<pubkey>:<d-tag>"
+  const parts = communityAddr.split(':');
+  const pubkey = parts[1];
+  const dtag = parts[2];
+
+  return useQuery<NostrEvent | undefined>({
+    queryKey: ['nostr', 'community-meta', communityAddr],
+    queryFn: async ({ signal }) => {
+      if (!pubkey || !dtag) return undefined;
+      const [event] = await nostr.query(
+        [{ kinds: [34550], authors: [pubkey], '#d': [dtag], limit: 1 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) },
+      );
+      return event;
+    },
+    enabled: !!pubkey && !!dtag,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Fetches approved posts for a community (kind 4550) */
+export function useCommunityFeed(communityAddr: string, limit = 30) {
+  const { nostr } = useNostr();
+
+  return useQuery<NostrEvent[]>({
+    queryKey: ['nostr', 'community-feed', communityAddr, limit],
+    queryFn: async ({ signal }) => {
+      if (!communityAddr) return [];
+      // Fetch approved posts (kind 4550) and NIP-22 kind 1111 posts
+      const [approvals, posts] = await Promise.all([
+        nostr.query(
+          [{ kinds: [4550], '#a': [communityAddr], limit }],
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+        ),
+        nostr.query(
+          [{ kinds: [1111], '#A': [communityAddr], limit }],
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+        ),
+      ]);
+      // Merge approvals + direct posts, dedup by id
+      const seen = new Set<string>();
+      return [...approvals, ...posts]
+        .filter((e) => {
+          if (seen.has(e.id)) return false;
+          seen.add(e.id);
+          return true;
+        })
+        .sort((a, b) => b.created_at - a.created_at);
+    },
+    enabled: !!communityAddr,
+    staleTime: 30 * 1000,
+  });
+}
+
+/** Fetches pending (unapproved) posts for moderation */
+export function useCommunityPending(communityAddr: string, enabled = false) {
+  const { nostr } = useNostr();
+
+  return useQuery<NostrEvent[]>({
+    queryKey: ['nostr', 'community-pending', communityAddr],
+    queryFn: async ({ signal }) => {
+      if (!communityAddr) return [];
+      return nostr.query(
+        [{ kinds: [1, 1111], '#a': [communityAddr], limit: 50 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+      );
+    },
+    enabled: enabled && !!communityAddr,
+    staleTime: 30 * 1000,
+  });
+}
+
+/** Check if current user is a moderator of a community */
+export function useIsModerator(communityEvent: NostrEvent | undefined): boolean {
+  const { user } = useCurrentUser();
+  if (!user || !communityEvent) return false;
+  return communityEvent.tags.some(
+    ([t, pk, , role]) =>
+      t === 'p' &&
+      pk === user.pubkey &&
+      (role === 'moderator' || role === 'admin' || role === undefined),
+  );
+}

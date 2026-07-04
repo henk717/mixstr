@@ -1,8 +1,14 @@
 import { ReactNode, useCallback, useRef, useState } from 'react';
 import { MixstrContext, type AudioTrack, type FeedViewMode } from '@/contexts/MixstrContext';
+import {
+  loadSidebarLists,
+  saveSidebarLists,
+  type SidebarList,
+} from '@/lib/sidebarLists';
 
 export function MixstrProvider({ children }: { children: ReactNode }) {
   const [feedViewModes, setFeedViewModes] = useState<Record<string, FeedViewMode>>({});
+  const [sidebarLists, setSidebarListsState] = useState<SidebarList[]>(() => loadSidebarLists());
   const [audioQueue, setAudioQueue] = useState<AudioTrack[]>([]);
   const [currentTrack, setCurrentTrack] = useState<AudioTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -14,11 +20,41 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     setFeedViewModes((prev) => ({ ...prev, [feedKey]: mode }));
   }, []);
 
+  // Sidebar list management
+  const setSidebarLists = useCallback((lists: SidebarList[]) => {
+    setSidebarListsState(lists);
+    saveSidebarLists(lists);
+  }, []);
+
+  const addSidebarList = useCallback((list: SidebarList) => {
+    setSidebarListsState((prev) => {
+      const next = [...prev, list];
+      saveSidebarLists(next);
+      return next;
+    });
+  }, []);
+
+  const updateSidebarList = useCallback((id: string, patch: Partial<SidebarList>) => {
+    setSidebarListsState((prev) => {
+      const next = prev.map((l) => (l.id === id ? { ...l, ...patch } : l));
+      saveSidebarLists(next);
+      return next;
+    });
+  }, []);
+
+  const removeSidebarList = useCallback((id: string) => {
+    setSidebarListsState((prev) => {
+      const next = prev.filter((l) => l.id !== id);
+      saveSidebarLists(next);
+      return next;
+    });
+  }, []);
+
+  // Audio player
   const playTrack = useCallback((track: AudioTrack) => {
     setCurrentTrack(track);
     setIsPlaying(true);
     setAudioProgress(0);
-    // Update or add to queue
     setAudioQueue((prev) => {
       const idx = prev.findIndex((t) => t.event.id === track.event.id);
       if (idx >= 0) {
@@ -82,6 +118,11 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
       value={{
         feedViewModes,
         setFeedViewMode,
+        sidebarLists,
+        setSidebarLists,
+        addSidebarList,
+        updateSidebarList,
+        removeSidebarList,
         audioQueue,
         currentTrack,
         isPlaying,

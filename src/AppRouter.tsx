@@ -6,8 +6,9 @@ import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { ExplorePage } from "./pages/ExplorePage";
-import { HashtagFeedPage } from "./pages/HashtagFeedPage";
-import { DvmFeedPage } from "./pages/DvmFeedPage";
+import { MessagesPage } from "./pages/MessagesPage";
+import { ListFeedPage } from "./pages/ListFeedPage";
+import { CommunityPage } from "./pages/CommunityPage";
 import { MainLayout } from "./components/layout/MainLayout";
 
 export function AppRouter() {
@@ -16,6 +17,7 @@ export function AppRouter() {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<Index />} />
+
         <Route
           path="/notifications"
           element={
@@ -24,6 +26,7 @@ export function AppRouter() {
             </MainLayout>
           }
         />
+
         <Route
           path="/explore"
           element={
@@ -32,24 +35,39 @@ export function AppRouter() {
             </MainLayout>
           }
         />
+
         <Route
-          path="/t/:tag"
+          path="/messages"
           element={
             <MainLayout>
-              <HashtagFeedPage />
+              <MessagesPage />
             </MainLayout>
           }
         />
+
+        {/* User-configured sidebar lists */}
         <Route
-          path="/dvm/:id"
+          path="/list/:id"
           element={
             <MainLayout>
-              <DvmFeedPage />
+              <ListFeedPage />
             </MainLayout>
           }
         />
+
+        {/* NIP-72 communities */}
+        <Route
+          path="/community/:addr"
+          element={
+            <MainLayout>
+              <CommunityPage />
+            </MainLayout>
+          }
+        />
+
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Page />} />
+
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
         <Route path="*" element={<NotFound />} />
       </Routes>
