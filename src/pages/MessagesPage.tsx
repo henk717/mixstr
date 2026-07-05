@@ -13,6 +13,7 @@ import { useMuteList } from '@/hooks/useMuteList';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,10 +27,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Mail, Lock, ArrowLeft, Send, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Mail, Lock, ArrowLeft, Send, Trash2, AlertCircle, RefreshCw, Plus } from 'lucide-react';
 import { relativeTime } from '@/lib/postUtils';
 import { nip19 } from 'nostr-tools';
-import { Link } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import type { Conversation, DecryptedMessage } from '@/hooks/useDirectMessages';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
@@ -61,18 +70,20 @@ function ConversationName({ pubkey }: { pubkey: string }) {
 
 function ConversationListItem({
   conv,
-  active,
+  selectedPeer,
   onSelect,
   onDelete,
   isDeleting,
 }: {
   conv: Conversation;
-  active: boolean;
-  onSelect: () => void;
+  selectedPeer: string | null;
+  onSelect: (npub: string) => void;
   onDelete: () => void;
   isDeleting: boolean;
 }) {
   const [showDelete, setShowDelete] = useState(false);
+  const peerNpub = useMemo(() => nip19.npubEncode(conv.peerPubkey), [conv.peerPubkey]);
+  const active = selectedPeer === conv.peerPubkey;
   const last = conv.lastMessage;
 
   return (
@@ -81,7 +92,7 @@ function ConversationListItem({
         'group flex items-center gap-3 px-4 py-3 cursor-pointer border-b border-border transition-colors',
         active ? 'bg-primary/10' : 'hover:bg-accent/30',
       )}
-      onClick={onSelect}
+      onClick={() => onSelect(peerNpub)}
     >
       <ConversationAvatar pubkey={conv.peerPubkey} />
 
@@ -176,11 +187,13 @@ function MessageBubble({ msg, myPubkey }: { msg: DecryptedMessage; myPubkey: str
 // ─── Chat view ────────────────────────────────────────────────────────────────
 
 function ChatView({
-  conv,
+  peerPubkey,
+  messages,
   myPubkey,
   onBack,
 }: {
-  conv: Conversation;
+  peerPubkey: string;
+  messages: DecryptedMessage[];
   myPubkey: string;
   onBack: () => void;
 }) {
@@ -189,20 +202,20 @@ function ChatView({
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const author = useAuthor(conv.peerPubkey);
+  const author = useAuthor(peerPubkey);
   const meta = author.data?.metadata;
-  const displayName = meta?.display_name || meta?.name || conv.peerPubkey.slice(0, 10) + '…';
-  const npub = nip19.npubEncode(conv.peerPubkey);
+  const displayName = meta?.display_name || meta?.name || peerPubkey.slice(0, 10) + '…';
+  const npub = nip19.npubEncode(peerPubkey);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [conv.messages.length]);
+  }, [messages.length]);
 
   async function handleSend() {
     if (!text.trim() || sending) return;
     setSending(true);
     try {
-      await send(conv.peerPubkey, text.trim());
+      await send(peerPubkey, text.trim());
       setText('');
     } catch (err) {
       toast({ title: 'Failed to send', description: String(err), variant: 'destructive' });
@@ -229,7 +242,7 @@ function ChatView({
           <ArrowLeft size={18} />
         </button>
         <Link to={`/${npub}`} className="flex items-center gap-3 group">
-          <ConversationAvatar pubkey={conv.peerPubkey} size="sm" />
+          <ConversationAvatar pubkey={peerPubkey} size="sm" />
           <div>
             <p className="text-sm font-semibold group-hover:text-primary transition-colors">
               {displayName}
@@ -244,12 +257,12 @@ function ChatView({
 
       {/* Messages — scrollable, fills remaining height */}
       <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
-        {conv.messages.length === 0 && (
+        {messages.length === 0 && (
           <div className="text-center text-muted-foreground text-sm py-8">
             No messages yet. Say hello!
           </div>
         )}
-        {conv.messages.map((msg) => (
+        {messages.map((msg) => (
           <MessageBubble key={msg.wrapId} msg={msg} myPubkey={myPubkey} />
         ))}
         <div ref={messagesEndRef} />
@@ -279,11 +292,85 @@ function ChatView({
   );
 }
 
+// ─── New conversation dialog ──────────────────────────────────────────────────
+
+function NewConversationDialog({
+  open,
+  onOpenChange,
+  onStart,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onStart: (input: string) => void;
+}) {
+  const [value, setValue] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setValue('');
+      setError('');
+    }
+  }, [open]);
+
+  function handleSubmit() {
+    const input = value.trim();
+    if (!input) return;
+
+    try {
+      const decoded = nip19.decode(input);
+      if (decoded.type !== 'npub' && decoded.type !== 'nprofile') {
+        setError('Only npub and nprofile identifiers are supported.');
+        return;
+      }
+      onStart(input);
+    } catch {
+      setError('Invalid npub or nprofile identifier.');
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New message</DialogTitle>
+          <DialogDescription>
+            Enter the recipient's npub or nprofile to start an encrypted conversation.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2 py-2">
+          <Input
+            value={value}
+            onChange={(e) => { setValue(e.target.value); setError(''); }}
+            placeholder="npub1…"
+            aria-invalid={!!error}
+          />
+          {error && (
+            <p className="text-sm text-destructive">{error}</p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={!value.trim()}>
+            Start conversation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function MessagesPage() {
   useSeoMeta({ title: 'Messages · Mixstr' });
 
+  const { recipient } = useParams();
+  const navigate = useNavigate();
   const { user } = useCurrentUser();
   const { data: messages = [], isLoading: msgsLoading, error } = useDirectMessages();
   const { data: deletions = {}, isLoading: deletionsLoading } = useDmDeletions();
@@ -291,7 +378,31 @@ export function MessagesPage() {
   const { mutate: deleteConv, isPending: isDeleting } = useDeleteConversation();
   const { toast } = useToast();
 
-  const [selectedPeer, setSelectedPeer] = useState<string | null>(null);
+  const [newDmOpen, setNewDmOpen] = useState(false);
+
+  const selectedPeer = useMemo<string | null>(() => {
+    if (!recipient?.trim()) return null;
+    try {
+      const decoded = nip19.decode(recipient.trim());
+      if (decoded.type === 'npub') return decoded.data;
+      if (decoded.type === 'nprofile') return decoded.data.pubkey;
+    } catch {
+      // Invalid route param is handled below.
+    }
+    return null;
+  }, [recipient]);
+
+  // Redirect away from invalid recipient identifiers.
+  useEffect(() => {
+    if (recipient && !selectedPeer) {
+      navigate('/messages', { replace: true });
+      toast({
+        title: 'Invalid recipient',
+        description: 'The message link did not contain a valid npub or nprofile.',
+        variant: 'destructive',
+      });
+    }
+  }, [recipient, selectedPeer, navigate, toast]);
 
   const isLoading = msgsLoading || deletionsLoading;
 
@@ -319,7 +430,7 @@ export function MessagesPage() {
             title: 'Conversation deleted',
             description: 'Hidden on all your devices. New messages will still appear.',
           });
-          if (selectedPeer === peerPubkey) setSelectedPeer(null);
+          if (selectedPeer === peerPubkey) navigate('/messages');
         },
         onError: (err) => {
           toast({
@@ -330,6 +441,11 @@ export function MessagesPage() {
         },
       },
     );
+  }
+
+  function handleStartConversation(input: string) {
+    navigate(`/messages/${input}`);
+    setNewDmOpen(false);
   }
 
   if (!user) {
@@ -359,14 +475,20 @@ export function MessagesPage() {
     <div className="max-w-2xl mx-auto flex flex-col h-full">
 
       {/* ── Conversation list view ── */}
-      {!selectedConv && (
+      {!selectedPeer && (
         <>
           {/* Header */}
           <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border flex-shrink-0">
-            <div className="px-4 py-4 flex items-center gap-2">
-              <Mail size={20} className="text-primary" />
-              <h1 className="text-lg font-bold">Messages</h1>
-              <Lock size={14} className="text-green-500 ml-1" title="End-to-end encrypted" />
+            <div className="px-4 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mail size={20} className="text-primary" />
+                <h1 className="text-lg font-bold">Messages</h1>
+                <Lock size={14} className="text-green-500 ml-1" title="End-to-end encrypted" />
+              </div>
+              <Button size="sm" className="gap-1.5" onClick={() => setNewDmOpen(true)}>
+                <Plus size={16} />
+                New
+              </Button>
             </div>
           </div>
 
@@ -411,6 +533,14 @@ export function MessagesPage() {
                   <p className="text-xs text-muted-foreground mt-1">
                     When someone sends you a NIP-17 encrypted message, it will appear here.
                   </p>
+                  <Button
+                    size="sm"
+                    className="gap-1.5 mt-4"
+                    onClick={() => setNewDmOpen(true)}
+                  >
+                    <Plus size={16} />
+                    Start a conversation
+                  </Button>
                 </CardContent>
               </Card>
             )}
@@ -419,8 +549,8 @@ export function MessagesPage() {
               <ConversationListItem
                 key={conv.peerPubkey}
                 conv={conv}
-                active={selectedPeer === conv.peerPubkey}
-                onSelect={() => setSelectedPeer(conv.peerPubkey)}
+                selectedPeer={selectedPeer}
+                onSelect={(peerNpub) => navigate(`/messages/${peerNpub}`)}
                 onDelete={() => handleDelete(conv.peerPubkey)}
                 isDeleting={isDeleting}
               />
@@ -430,13 +560,20 @@ export function MessagesPage() {
       )}
 
       {/* ── Chat view — fills the full height with sticky compose bar ── */}
-      {selectedConv && (
+      {selectedPeer && (
         <ChatView
-          conv={selectedConv}
+          peerPubkey={selectedPeer}
+          messages={selectedConv?.messages ?? []}
           myPubkey={user.pubkey}
-          onBack={() => setSelectedPeer(null)}
+          onBack={() => navigate('/messages')}
         />
       )}
+
+      <NewConversationDialog
+        open={newDmOpen}
+        onOpenChange={setNewDmOpen}
+        onStart={handleStartConversation}
+      />
     </div>
   );
 }

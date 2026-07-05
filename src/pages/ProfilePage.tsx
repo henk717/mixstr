@@ -48,6 +48,7 @@ import {
   UserCheck,
   Shield,
   Flag,
+  Mail,
 } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
@@ -327,7 +328,16 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           )}
 
           {!isOwnProfile && user && (
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap justify-end">
+              {user.signer.nip44 && (
+                <Button variant="outline" size="sm" className="gap-1.5" asChild>
+                  <Link to={`/messages/${npub}`}>
+                    <Mail size={14} />
+                    Message
+                  </Link>
+                </Button>
+              )}
+
               <Button
                 variant={isFollowing ? 'outline' : 'default'}
                 size="sm"

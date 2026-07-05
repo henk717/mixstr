@@ -74,6 +74,15 @@ export function AppRouter() {
           }
         />
 
+        <Route
+          path="/messages/:recipient"
+          element={
+            <MainLayout>
+              <MessagesPage />
+            </MainLayout>
+          }
+        />
+
         {/* User-configured sidebar lists */}
         <Route
           path="/list/:id"
