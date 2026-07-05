@@ -4,7 +4,7 @@ import { NostrContext } from '@nostrify/react';
 import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
-import { useRelayGossip, getGossipCandidates, GOSSIP_RELAY_LIMIT } from '@/hooks/useRelayGossip';
+import { useRelayGossip, getGossipCandidates, TARGET_RELAY_LIMIT } from '@/hooks/useRelayGossip';
 import {
   updateRelayStatus,
   addEventLog,
@@ -255,10 +255,27 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
         routes.set(url, filters);
       }
 
+      // For NIP-65 discovery queries, also route through the user's write relays.
+      // Write relays are where followers publish their own NIP-65 events, so they
+      // are often the best source for discovering outbox relays.
+      const isNip65Discovery = filters.some(
+        (f) => Array.isArray(f.kinds) && f.kinds.includes(10002),
+      );
+      if (isNip65Discovery) {
+        const writeRelays = pinnedRelays
+          .filter(r => r.write)
+          .map(r => r.url);
+        for (const url of writeRelays) {
+          if (!routes.has(url)) {
+            routes.set(url, filters);
+          }
+        }
+      }
+
       // Fill the remaining slots with gossip candidates, skipping any that
       // have failed to connect this session. If a high-ranking candidate
       // fails, the next one in the list takes its place.
-      const gossipSlots = Math.max(0, GOSSIP_RELAY_LIMIT - pinnedRelays.length);
+      const gossipSlots = Math.max(0, TARGET_RELAY_LIMIT - pinnedRelays.length);
       const activeGossip: string[] = [];
 
       for (const url of gossipCandidatesRef.current) {

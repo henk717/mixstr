@@ -133,6 +133,24 @@ export function getFailedRelays(): readonly string[] {
   return [...failedRelays];
 }
 
+// ── Periodic retry of failed relays ───────────────────────────────────────
+
+/**
+ * Relays that fail on the first connection attempt are often just temporarily
+ * unreachable (cold start, spotty network, DNS timeout). Re-trying them every
+ * few minutes lets the pool refill slots that would otherwise stay empty for the
+ * whole session.
+ */
+const FAILED_RELAY_RETRY_INTERVAL_MS = 5 * 60 * 1000;
+
+setInterval(() => {
+  if (failedRelays.size > 0) {
+    console.log(`[RelayMonitor] Clearing ${failedRelays.size} failed relays for retry`);
+    failedRelays.clear();
+    notify();
+  }
+}, FAILED_RELAY_RETRY_INTERVAL_MS);
+
 // ── Internal notify ───────────────────────────────────────────────────────
 
 function notify() {
