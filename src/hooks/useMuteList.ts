@@ -97,20 +97,21 @@ export function useMuteList() {
   const { data: followingHex = [] } = useFollowing();
   const { spamSettings } = useMixstr();
 
-  const { data: rawMuted } = useQuery<MuteList>({
-    queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''],
-    queryFn: async ({ signal }) => {
-      if (!user?.pubkey) return { pubkeys: new Set(), keywords: [], hashtags: [], lists: [] };
-      const [ev] = await nostr.query(
-        [{ kinds: [10000], authors: [user.pubkey], limit: 1 }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
-      );
-      return parseMuteEvent(ev ?? undefined, user);
-    },
-    enabled: !!user?.pubkey,
-    staleTime: 2 * 60 * 1000,
-    refetchOnWindowFocus: true,
-  });
+  const { data: muted = { pubkeys: new Set<string>(), keywords: [], hashtags: [], lists: [] } } =
+    useQuery<MuteList>({
+      queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''],
+      queryFn: async ({ signal }) => {
+        if (!user?.pubkey) return { pubkeys: new Set(), keywords: [], hashtags: [], lists: [] };
+        const [ev] = await nostr.query(
+          [{ kinds: [10000], authors: [user.pubkey], limit: 1 }],
+          { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
+        );
+        return parseMuteEvent(ev ?? undefined, user);
+      },
+      enabled: !!user?.pubkey,
+      staleTime: 2 * 60 * 1000,
+      refetchOnWindowFocus: true,
+    });
 
   // Fetch people from subscribed blocklists
   const { data: blockListPubkeys = new Set<string>() } = useQuery<Set<string>>({
@@ -135,7 +136,7 @@ export function useMuteList() {
         signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
   });
 
-  const muted = rawMuted ?? { pubkeys: new Set<string>(), keywords: [], hashtags: [], lists: [] };
+
 
       const blocked = new Set<string>();
       for (const ev of results) {
