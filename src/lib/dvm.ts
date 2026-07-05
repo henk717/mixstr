@@ -40,6 +40,7 @@ export interface FetchDvmFeedOptions {
 }
 
 const DEFAULT_TIMEOUT = 15_000;
+const MIN_RESPONSE_WAIT_MS = 4_500;
 const MAX_RESULT_EVENTS = 25;
 const ID_CHUNK_SIZE = 50;
 const SINCE_WINDOW_SECONDS = 7 * 24 * 60 * 60;
@@ -90,58 +91,110 @@ export async function fetchDvmFeedEvents(options: FetchDvmFeedOptions): Promise<
     requestTags.push(['relays', ...readRelays]);
   }
 
-  const filters: NostrFilter[] = [{ kinds: [6300], authors: [dvmHex], limit: MAX_RESULT_EVENTS, since }];
+  const filters: NostrFilter[] = [{ kinds: [6300], authors: [dvmHex], since, limit: MAX_RESULT_EVENTS }];
   let requestId: string | undefined;
 
   if (user) {
     try {
       const requestEvent = await publish({ kind: 5300, content: '', tags: requestTags });
       requestId = requestEvent.id;
-      filters.push({ kinds: [6300], authors: [dvmHex], '#e': [requestId], limit: MAX_RESULT_EVENTS });
+      filters.push({ kinds: [6300], authors: [dvmHex], '#e': [requestId], since, limit: MAX_RESULT_EVENTS });
     } catch {
       // If publishing fails (no write relays, etc.) fall back to pre-published results.
     }
   }
 
-  const resultEvents = await collectDvmResults(nostr, filters, limit, timeoutMs, signal);
+  // Listen on the same relays we told the DVM to publish responses to. This
+  // avoids outbox-routing mismatches where the DVM answers on our read relays
+  // but the pool queries a different set.
+  const resultEvents = await collectDvmResults(nostr, filters, {
+    requestId,
+    targetRefs: limit,
+    minWaitMs: MIN_RESPONSE_WAIT_MS,
+    maxWaitMs: timeoutMs,
+    relays: readRelays,
+    signal,
+  });
   if (resultEvents.length === 0) return [];
 
-  const refs = extractDvmReferences(resultEvents);
+  // Ignore references back to the original job request or to the result events
+  // themselves (e.g. an e-tag on the result pointing at the request id).
+  const excludeIds = new Set<string>(resultEvents.map((e) => e.id));
+  if (requestId) excludeIds.add(requestId);
+
+  // Prefer results that are responding to our own request; fall back to any
+  // pre-published recent results only when no personal response arrived.
+  const ownResponses = requestId
+    ? resultEvents.filter((e) => e.tags.some(([name, value]) => name === 'e' && value === requestId))
+    : [];
+
+  const candidates = ownResponses.length > 0 ? ownResponses : resultEvents;
+  const refs = extractDvmReferences(candidates, excludeIds);
   return fetchReferencedEvents(nostr, refs, signal);
 }
 
+interface CollectDvmResultsOptions {
+  requestId?: string;
+  targetRefs: number;
+  minWaitMs: number;
+  maxWaitMs: number;
+  relays?: string[];
+  signal?: AbortSignal;
+}
+
 /**
- * Collect kind-6300 DVM result events using a live subscription. Stops early
- * if enough event references have been gathered, otherwise waits the full
- * timeout so late-arriving results are captured.
+ * Collect kind-6300 DVM result events using a live subscription.
+ *
+ * Waits at least `minWaitMs` before accepting pre-published results so there is
+ * time for the DVM to respond to the request we just published. If a result
+ * that references our request arrives earlier and is large enough, we stop
+ * immediately to keep the feed snappy.
  */
 async function collectDvmResults(
   nostr: DvmNostrPool,
   filters: NostrFilter[],
-  targetRefs: number,
-  timeoutMs: number,
-  signal?: AbortSignal,
+  options: CollectDvmResultsOptions,
 ): Promise<NostrEvent[]> {
+  const { requestId, targetRefs, minWaitMs, maxWaitMs, relays, signal } = options;
+  const start = Date.now();
   const results: NostrEvent[] = [];
   const seen = new Set<string>();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), maxWaitMs);
 
-  let abortedEarly = false;
+  function shouldUseFallback(): boolean {
+    if (!requestId) return true;
+    if (results.length === 0) return false;
+    return !results.some((e) => e.tags.some(([name, value]) => name === 'e' && value === requestId));
+  }
 
   try {
-    for await (const msg of nostr.req(filters, { signal: AbortSignal.any([signal, controller.signal].filter(Boolean) as AbortSignal[]) })) {
-      if (abortedEarly) break;
+    const anySignal = AbortSignal.any([signal, controller.signal].filter(Boolean) as AbortSignal[]);
+    for await (const msg of nostr.req(filters, { signal: anySignal, relays })) {
       const event = parseEventMessage(msg);
       if (!event || seen.has(event.id)) continue;
       seen.add(event.id);
       results.push(event);
 
-      // If we have enough references there is no need to wait the full window.
-      const refs = extractDvmReferences(results);
-      if (refs.ids.length + refs.addresses.length >= targetRefs) {
-        abortedEarly = true;
+      const isOwnResponse =
+        !!requestId && event.tags.some(([name, value]) => name === 'e' && value === requestId);
+
+      if (isOwnResponse) {
+        const ownResults = results.filter((e) =>
+          e.tags.some(([name, value]) => name === 'e' && value === requestId)
+        );
+        const refs = extractDvmReferences(ownResults);
+        if (refs.ids.length + refs.addresses.length >= targetRefs) {
+          controller.abort();
+          break;
+        }
+      }
+
+      const elapsed = Date.now() - start;
+      if (elapsed >= minWaitMs && !shouldUseFallback()) {
+        // We have at least one response to our request; use it.
         controller.abort();
+        break;
       }
     }
   } catch (error) {
@@ -157,7 +210,7 @@ async function collectDvmResults(
 }
 
 /** Extract references (event IDs and addressable coordinates) from results. */
-export function extractDvmReferences(results: NostrEvent[]): DvmReferences {
+export function extractDvmReferences(results: NostrEvent[], excludeIds?: Set<string>): DvmReferences {
   const ids: string[] = [];
   const addresses: DvmAddressableRef[] = [];
   const seenIds = new Set<string>();
@@ -165,7 +218,7 @@ export function extractDvmReferences(results: NostrEvent[]): DvmReferences {
 
   const addId = (value: string) => {
     const clean = value.trim().toLowerCase();
-    if (clean.length === 64 && /^[0-9a-f]+$/.test(clean) && !seenIds.has(clean)) {
+    if (clean.length === 64 && /^[0-9a-f]+$/.test(clean) && !seenIds.has(clean) && !excludeIds?.has(clean)) {
       seenIds.add(clean);
       ids.push(clean);
     }
