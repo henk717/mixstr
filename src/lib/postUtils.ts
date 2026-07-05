@@ -262,9 +262,43 @@ export function getParentEventId(event: NostrEvent): { id: string; relay?: strin
   return { id: last[1], relay: last[2] || undefined };
 }
 
-/** Check if event is a repost (kind 6) */
+/** Check if event is a repost (kind 6 or generic kind 16) */
 export function isRepost(event: NostrEvent): boolean {
-  return event.kind === 6;
+  return event.kind === 6 || event.kind === 16;
+}
+
+/** Check if event is a community post approval wrapper (kind 4550) */
+export function isCommunityApproval(event: NostrEvent): boolean {
+  return event.kind === 4550;
+}
+
+/**
+ * Try to extract an embedded event from wrapper kinds whose content is a
+ * JSON-encoded Nostr event (reposts: kind 6/16, community approvals: kind 4550).
+ * Returns null if the event is not a wrapper or its content is not valid.
+ */
+export function tryExtractEmbeddedEvent(event: NostrEvent): NostrEvent | null {
+  if (!isRepost(event) && !isCommunityApproval(event)) return null;
+  if (!event.content) return null;
+  try {
+    const parsed = JSON.parse(event.content) as unknown;
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof (parsed as Record<string, unknown>).id === 'string' &&
+      typeof (parsed as Record<string, unknown>).pubkey === 'string' &&
+      typeof (parsed as Record<string, unknown>).created_at === 'number' &&
+      typeof (parsed as Record<string, unknown>).kind === 'number' &&
+      Array.isArray((parsed as Record<string, unknown>).tags) &&
+      typeof (parsed as Record<string, unknown>).content === 'string' &&
+      typeof (parsed as Record<string, unknown>).sig === 'string'
+    ) {
+      return parsed as NostrEvent;
+    }
+  } catch {
+    // not JSON or not an event
+  }
+  return null;
 }
 
 /** Check if kind is long-form article */

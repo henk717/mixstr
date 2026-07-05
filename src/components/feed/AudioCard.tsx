@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Play, Plus, Music, Video } from 'lucide-react';
+import { Play, Plus, Music, Video, CheckCircle } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
@@ -10,6 +10,7 @@ import {
   relativeTime,
   getAudioTrackInfo,
   eventToNevent,
+  tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
 import { useMixstr } from '@/hooks/useMixstr';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -18,27 +19,33 @@ import type { AudioTrack } from '@/contexts/MixstrContext';
 
 interface AudioCardProps {
   event: NostrEvent;
+  /** Optional community moderation action. */
+  moderation?: { onApprove: () => void };
 }
 
-export function AudioCard({ event }: AudioCardProps) {
+export function AudioCard({ event, moderation }: AudioCardProps) {
   const navigate = useNavigate();
-  const author = useAuthor(event.pubkey);
+
+  // Reposts and community approvals wrap the real post as JSON in content.
+  const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
+
+  const author = useAuthor(displayEvent.pubkey);
   const meta = author.data?.metadata;
-  const npub = nip19.npubEncode(event.pubkey);
+  const npub = nip19.npubEncode(displayEvent.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
-  const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
+  const displayName = rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
   const { playTrack, addToQueue } = useMixstr();
 
-  const trackInfo = getAudioTrackInfo(event);
-  const cover = getCoverImage(event);
-  const title = getEventTitle(event) ?? (event.content.slice(0, 60).trim() || 'Untitled Track');
-  const nevent = eventToNevent(event);
+  const trackInfo = getAudioTrackInfo(displayEvent);
+  const cover = getCoverImage(displayEvent);
+  const title = getEventTitle(displayEvent) ?? (displayEvent.content.slice(0, 60).trim() || 'Untitled Track');
+  const nevent = eventToNevent(displayEvent);
 
   // Nothing playable
   if (!trackInfo) return null;
 
   const track: AudioTrack = {
-    event,
+    event: displayEvent,
     title: trackInfo.title,
     url: trackInfo.url,
     artist: displayName,
@@ -105,7 +112,7 @@ export function AudioCard({ event }: AudioCardProps) {
           {displayName}
         </Link>
         <div className="flex items-center gap-1.5">
-          <p className="text-xs text-muted-foreground">{relativeTime(event.created_at)}</p>
+          <p className="text-xs text-muted-foreground">{relativeTime(displayEvent.created_at)}</p>
           {trackInfo.isVideo && (
             <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded">video</span>
           )}
@@ -114,6 +121,16 @@ export function AudioCard({ event }: AudioCardProps) {
 
       {/* Action buttons — stop propagation so they don't navigate */}
       <div className="flex items-center gap-1 flex-shrink-0">
+        {moderation && (
+          <Button
+            size="sm"
+            onClick={(e) => { e.stopPropagation(); moderation.onApprove(); }}
+            className="gap-1.5 h-7 text-xs bg-green-600 hover:bg-green-500 text-white mr-1"
+          >
+            <CheckCircle size={13} />
+            Approve
+          </Button>
+        )}
         <Button
           size="icon"
           variant="ghost"

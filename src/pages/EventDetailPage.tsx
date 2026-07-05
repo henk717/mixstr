@@ -1,6 +1,6 @@
 import { useSeoMeta } from '@unhead/react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, MessageCircle } from 'lucide-react';
+import { ArrowLeft, MessageCircle, Repeat2, CheckCircle } from 'lucide-react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
@@ -19,11 +19,13 @@ import {
   getEventTitle,
   getCoverImage,
   getSummary,
-  isLongform,
   relativeTime,
+  isLongform,
   isReply,
   getParentEventId,
   eventToNevent,
+  tryExtractEmbeddedEvent,
+  isCommunityApproval,
 } from '@/lib/postUtils';
 
 interface EventDetailPageProps {
@@ -36,7 +38,7 @@ interface EventDetailPageProps {
 export function EventDetailPage({ eventId, pubkey, kind }: EventDetailPageProps) {
   const { nostr } = useNostr();
 
-  const { data: event, isLoading } = useQuery<NostrEvent | null>({
+  const { data: outerEvent, isLoading } = useQuery<NostrEvent | null>({
     queryKey: ['nostr', 'event-detail', eventId, pubkey ?? '', kind ?? 0],
     queryFn: async ({ signal }) => {
       let filter;
@@ -55,6 +57,10 @@ export function EventDetailPage({ eventId, pubkey, kind }: EventDetailPageProps)
     },
     staleTime: 5 * 60 * 1000,
   });
+
+  // Reposts and community approvals wrap the real post as JSON in content.
+  const event = outerEvent ? (tryExtractEmbeddedEvent(outerEvent) ?? outerEvent) : null;
+  const wrapper = outerEvent && tryExtractEmbeddedEvent(outerEvent) ? outerEvent : null;
 
   useSeoMeta({
     title: event
@@ -81,7 +87,7 @@ export function EventDetailPage({ eventId, pubkey, kind }: EventDetailPageProps)
         </Card>
       )}
 
-      {event && <EventDetailBody event={event} />}
+      {event && <EventDetailBody event={event} wrapper={wrapper} />}
     </div>
   );
 }
@@ -95,7 +101,7 @@ function BackButton() {
   );
 }
 
-function EventDetailBody({ event }: { event: NostrEvent }) {
+function EventDetailBody({ event, wrapper }: { event: NostrEvent; wrapper?: NostrEvent | null }) {
   const navigate = useNavigate();
   const longform = isLongform(event);
   const title = getEventTitle(event);
@@ -121,6 +127,13 @@ function EventDetailBody({ event }: { event: NostrEvent }) {
               <ReplyingToChip parentId={parentRef.id} isPending={parentPending} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* Wrapper banner (repost / community approval) */}
+      {wrapper && (
+        <div className="px-4 pt-3 pb-0 border-b border-border">
+          <WrapperBanner wrapper={wrapper} />
         </div>
       )}
 
@@ -158,6 +171,28 @@ function EventDetailBody({ event }: { event: NostrEvent }) {
       {/* All replies */}
       <AllReplies eventId={event.id} />
     </>
+  );
+}
+
+function WrapperBanner({ wrapper }: { wrapper: NostrEvent }) {
+  const author = useAuthor(wrapper.pubkey);
+  const meta = author.data?.metadata;
+  const rawName = meta?.display_name || meta?.name || '';
+  const name = rawName.trim() || wrapper.pubkey.slice(0, 10) + '…';
+  const isApproval = isCommunityApproval(wrapper);
+
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground pl-[54px]">
+      {isApproval ? <CheckCircle size={13} /> : <Repeat2 size={13} />}
+      <Link
+        to={`/${eventToNevent(wrapper)}`}
+        onClick={(e) => e.stopPropagation()}
+        className="hover:underline"
+      >
+        {name}
+      </Link>
+      <span>{isApproval ? 'approved this post' : 'reposted this post'}</span>
+    </div>
   );
 }
 

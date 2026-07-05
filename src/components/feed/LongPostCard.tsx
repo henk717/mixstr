@@ -21,15 +21,20 @@ import {
   eventToNevent,
   getParentEventId,
   hasMedia as eventHasMedia,
+  tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
 import { useTopComments } from '@/hooks/useEventComments';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useParentEvent } from '@/hooks/useParentEvent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { CheckCircle } from 'lucide-react';
 
 interface LongPostCardProps {
   event: NostrEvent;
+  /** Optional community moderation action. */
+  moderation?: { onApprove: () => void };
 }
 
 /**
@@ -49,27 +54,31 @@ interface LongPostCardProps {
  */
 const TEXT_ONLY_CLAMP = 2000;
 
-export function LongPostCard({ event }: LongPostCardProps) {
+export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const [textExpanded, setTextExpanded] = useState(false);
   const [coverLightboxOpen, setCoverLightboxOpen] = useState(false);
   const navigate = useNavigate();
-  const nevent = eventToNevent(event);
 
-  const reply = isReply(event);
-  const parentRef = reply ? getParentEventId(event) : null;
+  // Reposts and community approvals wrap the real post as JSON in content.
+  const embeddedEvent = tryExtractEmbeddedEvent(event);
+  const displayEvent = embeddedEvent ?? event;
+  const nevent = eventToNevent(displayEvent);
+
+  const reply = isReply(displayEvent);
+  const parentRef = reply ? getParentEventId(displayEvent) : null;
   const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
-  const longform = isLongform(event);
-  const title = getEventTitle(event);
-  const cover = getCoverImage(event);
-  const summary = getSummary(event);
+  const longform = isLongform(displayEvent);
+  const title = getEventTitle(displayEvent);
+  const cover = getCoverImage(displayEvent);
+  const summary = getSummary(displayEvent);
 
-  const images = extractImages(event);
-  const videos = extractVideos(event);
-  const hasAnyMedia = eventHasMedia(event) || images.length > 0 || videos.length > 0;
+  const images = extractImages(displayEvent);
+  const videos = extractVideos(displayEvent);
+  const hasAnyMedia = eventHasMedia(displayEvent) || images.length > 0 || videos.length > 0;
 
   // Only clamp text for extremely long text-only posts.
   // If the post has media, always show full text so context isn't cut off.
-  const isVeryLong = event.content.length > TEXT_ONLY_CLAMP;
+  const isVeryLong = displayEvent.content.length > TEXT_ONLY_CLAMP;
   const shouldClampText = isVeryLong && !hasAnyMedia && !textExpanded;
 
   const handleCardClick = () => navigate(`/${nevent}`);
@@ -97,7 +106,7 @@ export function LongPostCard({ event }: LongPostCardProps) {
       )}
 
       <div className="px-4 py-5">
-        <PostAuthor pubkey={event.pubkey} createdAt={event.created_at} />
+        <PostAuthor pubkey={displayEvent.pubkey} createdAt={displayEvent.created_at} />
 
         <div className="mt-3 space-y-3">
           {longform ? (
@@ -212,11 +221,24 @@ export function LongPostCard({ event }: LongPostCardProps) {
         </div>
 
         {/* Top 3 comments preview */}
-        <CommentPreview eventId={event.id} nevent={nevent} />
+        <CommentPreview eventId={displayEvent.id} nevent={nevent} />
 
         <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-          <PostActions event={event} />
+          <PostActions event={displayEvent} />
         </div>
+
+        {moderation && (
+          <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+            <Button
+              size="sm"
+              onClick={moderation.onApprove}
+              className="gap-1.5 h-7 text-xs bg-green-600 hover:bg-green-500 text-white"
+            >
+              <CheckCircle size={13} />
+              Approve
+            </Button>
+          </div>
+        )}
       </div>
     </article>
   );

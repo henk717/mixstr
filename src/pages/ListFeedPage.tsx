@@ -7,6 +7,10 @@ import { useMixstr } from '@/hooks/useMixstr';
 import { useListFeed } from '@/hooks/useListFeed';
 import { useRssFeed } from '@/hooks/useRssFeed';
 import { useMuteList } from '@/hooks/useMuteList';
+import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useToast } from '@/hooks/useToast';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useCommunityMetas, isModeratorOf } from '@/hooks/useCommunity';
 import { FeedView } from '@/components/feed/FeedView';
 import { ShortPostCard } from '@/components/feed/ShortPostCard';
 import { RssItemCard } from '@/components/feed/RssItemCard';
@@ -18,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { sourceDescription } from '@/lib/sidebarLists';
+import { tryExtractEmbeddedEvent } from '@/lib/postUtils';
 import type { RssItem } from '@/hooks/useRssFeed';
 import type { NostrEvent } from '@nostrify/nostrify';
 
@@ -36,8 +41,28 @@ export function ListFeedPage() {
   const list = sidebarLists.find((l) => l.id === id);
   const feedKey = `list:${id}`;
   const mode = feedViewModes[feedKey] ?? 'short';
+  const { user } = useCurrentUser();
+  const { mutateAsync: publish } = useNostrPublish();
+  const { toast } = useToast();
 
   useSeoMeta({ title: `${list?.label ?? 'Feed'} · Mixstr` });
+
+  // Community moderation state
+  const communityAddrs = useMemo(
+    () => (list?.sources ?? []).filter((s) => s.type === 'community' && s.communityId).map((s) => s.communityId!),
+    [list?.sources],
+  );
+  const { data: communityMetas = new Map<string, NostrEvent>() } = useCommunityMetas(communityAddrs);
+  const moderatorCommunities = useMemo(() => {
+    const set = new Set<string>();
+    if (!user?.pubkey) return set;
+    for (const addr of communityAddrs) {
+      if (isModeratorOf(communityMetas.get(addr), user.pubkey)) {
+        set.add(addr);
+      }
+    }
+    return set;
+  }, [communityAddrs, communityMetas, user?.pubkey]);
 
   const {
     data,
@@ -70,7 +95,76 @@ export function ListFeedPage() {
     [nostrPages],
   );
 
+  // Determine which posts are already approved so we only show the Approve
+  // button on unapproved kind-1 posts in communities the user moderates.
+  const approvedIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const event of allNostrEvents) {
+      if (event.kind === 1111) {
+        set.add(event.id);
+        continue;
+      }
+      if (event.kind === 4550) {
+        for (const tag of event.tags) {
+          if ((tag[0] === 'e' || tag[0] === 'a' || tag[0] === 'A') && tag[1]) {
+            set.add(tag[1]);
+          }
+        }
+        const inner = tryExtractEmbeddedEvent(event);
+        if (inner) set.add(inner.id);
+      }
+    }
+    return set;
+  }, [allNostrEvents]);
+
   const isLoading = nostrLoading || (hasRssSources && rssLoading);
+
+  const moderation = useMemo(() => {
+    if (!user?.pubkey || moderatorCommunities.size === 0) return undefined;
+
+    const canApprove = (event: NostrEvent) => {
+      if (event.kind !== 1) return false;
+      if (approvedIds.has(event.id)) return false;
+      return event.tags.some(
+        ([t, v]) =>
+          (t === 'a' || t === 'A') &&
+          v &&
+          v.startsWith('34550:') &&
+          moderatorCommunities.has(v),
+      );
+    };
+
+    const onApprove = async (event: NostrEvent) => {
+      const communityAddr = event.tags
+        .filter(([t, v]): v is string => (t === 'a' || t === 'A') && typeof v === 'string' && v.startsWith('34550:'))
+        .map(([, v]) => v)
+        .find((v) => moderatorCommunities.has(v));
+
+      if (!communityAddr) {
+        toast({ title: 'Cannot approve', description: 'No moderated community found for this post.', variant: 'destructive' });
+        return;
+      }
+
+      try {
+        await publish({
+          kind: 4550,
+          content: JSON.stringify(event),
+          tags: [
+            ['a', communityAddr],
+            ['e', event.id],
+            ['p', event.pubkey],
+            ['k', String(event.kind)],
+          ],
+        });
+        toast({ title: 'Post approved', description: 'The post is now approved for this community.' });
+        await queryClient.invalidateQueries({ queryKey: ['nostr', 'list-feed-infinite', id] });
+      } catch (err) {
+        toast({ title: 'Approval failed', description: String(err), variant: 'destructive' });
+      }
+    };
+
+    return { canApprove, onApprove };
+  }, [approvedIds, moderatorCommunities, publish, queryClient, toast, user?.pubkey, id]);
 
   async function handleRefetch() {
     if (isRefreshing) return;
@@ -203,7 +297,11 @@ export function ListFeedPage() {
             entry.type === 'rss' ? (
               <RssItemCard key={entry.item.id} item={entry.item} />
             ) : (
-              <ShortPostCard key={entry.event.id} event={entry.event} />
+              <ShortPostCard
+                key={entry.event.id}
+                event={entry.event}
+                moderation={moderation?.canApprove(entry.event) ? { onApprove: () => void moderation.onApprove(entry.event) } : undefined}
+              />
             ),
           )}
           {/* Infinite scroll sentinel for Nostr side */}
@@ -242,6 +340,7 @@ export function ListFeedPage() {
             list.sources.every((s) => s.type === 'livestream')
           }
           viewOptions={list.viewOptions}
+          moderation={moderation}
         />
       )}
 

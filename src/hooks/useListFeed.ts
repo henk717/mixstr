@@ -4,6 +4,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { NRelay1 } from '@nostrify/nostrify';
 import { useFollowing } from './useFollowing';
 import { useCurrentUser } from './useCurrentUser';
+import { useCommunityMetas, isModeratorOf } from './useCommunity';
 import type { SidebarList, ListSource } from '@/lib/sidebarLists';
 import { nip19 } from 'nostr-tools';
 import { useNostrPublish } from './useNostrPublish';
@@ -124,6 +125,14 @@ export function useListFeed(list: SidebarList) {
 
   // Pre-fetch DVM results for any DVM sources in this list
   const dvmSources = list.sources.filter((s) => s.type === 'dvm' && s.dvmPubkey);
+
+  // Pre-fetch community definitions so we can decide whether to include
+  // unapproved posts and which approval events to trust.
+  const communitySources = list.sources.filter((s) => s.type === 'community' && s.communityId);
+  const { data: communityMetas = new Map<string, NostrEvent>() } = useCommunityMetas(
+    communitySources.map((s) => s.communityId!),
+  );
+
   const { data: dvmEvents = [] } = useQuery<NostrEvent[]>({
     queryKey: ['nostr', 'list-dvm-results', list.id, dvmSources.map((s) => s.dvmPubkey).join(','), user?.pubkey ?? ''],
     queryFn: async ({ signal }) => {
@@ -181,14 +190,14 @@ export function useListFeed(list: SidebarList) {
   });
 
   return useInfiniteQuery<NostrEvent[]>({
-    queryKey: ['nostr', 'list-feed-infinite', list.id, list.sources.map((s) => s.id).join(','), dvmEvents.length],
+    queryKey: ['nostr', 'list-feed-infinite', list.id, list.sources.map((s) => s.id).join(','), dvmEvents.length, communityMetas],
     queryFn: async ({ pageParam, signal }) => {
       const until = pageParam as number | undefined;
       const abort = AbortSignal.any([signal, AbortSignal.timeout(10000)]);
 
       const batches = await Promise.allSettled(
         list.sources.map((source) =>
-          fetchSource(source, { nostr, myFollowing, user, abort, limit: PAGE_SIZE, until, dvmEvents }),
+          fetchSource(source, { nostr, myFollowing, user, abort, limit: PAGE_SIZE, until, dvmEvents, communityMetas }),
         ),
       );
 
@@ -231,9 +240,10 @@ async function fetchSource(
     limit: number;
     until?: number;
     dvmEvents: NostrEvent[];
+    communityMetas: Map<string, NostrEvent>;
   },
 ): Promise<NostrEvent[]> {
-  const { nostr, myFollowing, user, abort, limit, until, dvmEvents } = ctx;
+  const { nostr, myFollowing, user, abort, limit, until, dvmEvents, communityMetas } = ctx;
 
   const timeFilter = until ? { until } : {};
 
@@ -294,13 +304,56 @@ async function fetchSource(
 
     case 'community': {
       if (!source.communityId) return [];
-      return nostr.query(
-        [
-          { kinds: [1111], '#A': [source.communityId], limit, ...timeFilter },
-          { kinds: [4550], '#a': [source.communityId], limit, ...timeFilter },
-        ],
-        { signal: abort },
-      );
+
+      const communityEvent = communityMetas.get(source.communityId);
+      const isModerator = isModeratorOf(communityEvent, user?.pubkey);
+      const showUnapproved = isModerator || source.showUnapproved;
+
+      const [approvals, candidates] = await Promise.all([
+        nostr.query(
+          [{ kinds: [4550], '#a': [source.communityId], limit, ...timeFilter }],
+          { signal: abort },
+        ),
+        nostr.query(
+          [
+            { kinds: [1, 1111], '#a': [source.communityId], limit, ...timeFilter },
+            { kinds: [1111], '#A': [source.communityId], limit, ...timeFilter },
+          ],
+          { signal: abort },
+        ),
+      ]);
+
+      // Build the set of approved post identifiers. Approval events reference
+      // the approved post via an `e` tag and/or an `a` tag, and also embed the
+      // full original event in their content.
+      const approvedIds = new Set<string>();
+      for (const approval of approvals) {
+        for (const tag of approval.tags) {
+          if ((tag[0] === 'e' || tag[0] === 'a' || tag[0] === 'A') && tag[1]) {
+            approvedIds.add(tag[1]);
+          }
+        }
+        try {
+          const parsed = JSON.parse(approval.content) as { id?: string };
+          if (parsed?.id) approvedIds.add(parsed.id);
+        } catch {
+          // ignore malformed embedded event
+        }
+      }
+
+      const isApproved = (event: NostrEvent) =>
+        event.kind === 1111 || approvedIds.has(event.id);
+
+      const result: NostrEvent[] = [...approvals];
+      const seen = new Set(result.map((e) => e.id));
+      for (const candidate of candidates) {
+        if (seen.has(candidate.id)) continue;
+        if (showUnapproved || isApproved(candidate)) {
+          result.push(candidate);
+          seen.add(candidate.id);
+        }
+      }
+      return result;
     }
 
     case 'group': {

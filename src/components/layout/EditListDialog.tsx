@@ -608,6 +608,20 @@ function CommunityField({
         />
       </div>
 
+      {/* Show unapproved posts */}
+      <div className="flex items-center justify-between rounded-lg border border-border p-2.5">
+        <div className="space-y-0.5">
+          <Label className="text-xs">Show unapproved posts</Label>
+          <p className="text-[10px] text-muted-foreground">
+            Include posts that have not yet been approved by a moderator. Moderators always see them.
+          </p>
+        </div>
+        <Switch
+          checked={source.showUnapproved ?? false}
+          onCheckedChange={(checked) => onChange({ ...source, showUnapproved: checked })}
+        />
+      </div>
+
       {/* Create community */}
       {user ? (
         <div className="pt-1">

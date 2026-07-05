@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Play, Image, Plus, Wifi } from 'lucide-react';
+import { Play, Image, Plus, Wifi, CheckCircle } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
@@ -14,36 +14,44 @@ import {
   relativeTime,
   eventToNevent,
   getAudioTrackInfo,
+  tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
 import { useMixstr } from '@/hooks/useMixstr';
 import type { AudioTrack } from '@/contexts/MixstrContext';
 
 interface MediaCardProps {
   event: NostrEvent;
+  /** Optional community moderation action. */
+  moderation?: { onApprove: () => void };
 }
 
-export function MediaCard({ event }: MediaCardProps) {
+export function MediaCard({ event, moderation }: MediaCardProps) {
   const navigate = useNavigate();
-  const author = useAuthor(event.pubkey);
+
+  // Reposts and community approvals wrap the real post as JSON in content.
+  const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
+
+  const author = useAuthor(displayEvent.pubkey);
   const meta = author.data?.metadata;
-  const npub = nip19.npubEncode(event.pubkey);
+  const npub = nip19.npubEncode(displayEvent.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
-  const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
+  const displayName = rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
   const { addToQueue } = useMixstr();
 
-  const images = extractImages(event);
-  const videos = extractVideos(event);
-  const embeds = extractExternalEmbeds(event);
-  const livestream = isLivestream(event) ? getLivestreamInfo(event) : null;
+  const images = extractImages(displayEvent);
+  const videos = extractVideos(displayEvent);
+  const embeds = extractExternalEmbeds(displayEvent);
+  const livestream = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
   const isVideo = videos.length > 0;
   const isEmbed = embeds.length > 0 && !isVideo;
   const embed = embeds[0];
-  const title = getEventTitle(event) ?? event.content.slice(0, 80).trim();
+  const title = getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim();
 
   // Choose thumbnail
   const thumbnail = embed?.thumbnail ?? images[0];
-  const nevent = eventToNevent(event);
+  const nevent = eventToNevent(displayEvent);
 
   // Nothing displayable
   if (!thumbnail && !isVideo && !isEmbed && !livestream) return null;
@@ -57,7 +65,7 @@ export function MediaCard({ event }: MediaCardProps) {
     const trackInfo = getAudioTrackInfo(event);
     if (!trackInfo) return;
     const track: AudioTrack = {
-      event,
+      event: displayEvent,
       title: trackInfo.title,
       url: trackInfo.url,
       artist: displayName,
@@ -143,15 +151,28 @@ export function MediaCard({ event }: MediaCardProps) {
           <p className="text-sm font-medium text-foreground line-clamp-2 leading-snug">
             {title || 'Untitled'}
           </p>
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">{displayName}</p>
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{displayName}</p>
           <div className="flex items-center gap-2">
-            <p className="text-xs text-muted-foreground">{relativeTime(event.created_at)}</p>
+            <p className="text-xs text-muted-foreground">{relativeTime(displayEvent.created_at)}</p>
             {livestream?.viewers != null && (
               <p className="text-xs text-red-400">{livestream.viewers} watching</p>
             )}
           </div>
         </div>
       </div>
+
+      {moderation && (
+        <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="sm"
+            onClick={moderation.onApprove}
+            className="gap-1.5 h-7 text-xs bg-green-600 hover:bg-green-500 text-white w-full"
+          >
+            <CheckCircle size={13} />
+            Approve
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
-import { relativeTime, stripMediaUrls } from '@/lib/postUtils';
+import { relativeTime, stripMediaUrls, tryExtractEmbeddedEvent } from '@/lib/postUtils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 /**
@@ -20,14 +20,16 @@ export function ReplyParentPreview({
   onParentClick: () => void;
   className?: string;
 }) {
-  const author = useAuthor(parent.pubkey);
+  // Reposts/community approvals can appear as parents in some thread layouts.
+  const displayParent = tryExtractEmbeddedEvent(parent) ?? parent;
+  const author = useAuthor(displayParent.pubkey);
   const meta = author.data?.metadata;
   const rawName = meta?.display_name || meta?.name || '';
-  const displayName = rawName.trim() || parent.pubkey.slice(0, 10) + '…';
-  const npub = nip19.npubEncode(parent.pubkey);
+  const displayName = rawName.trim() || displayParent.pubkey.slice(0, 10) + '…';
+  const npub = nip19.npubEncode(displayParent.pubkey);
 
   // Strip media URLs from the preview text for compactness
-  const previewText = parent.content
+  const previewText = displayParent.content
     .replace(/https?:\/\/\S+\.(?:jpg|jpeg|png|gif|webp|avif|mp4|webm|mov|mp3|ogg|wav)(?:[?#]\S*)?/gi, '')
     .replace(/\n{2,}/g, ' ')
     .trim()
@@ -69,12 +71,12 @@ export function ReplyParentPreview({
               {displayName}
             </Link>
             <span className="text-xs text-muted-foreground flex-shrink-0">
-              {relativeTime(parent.created_at)}
+              {relativeTime(displayParent.created_at)}
             </span>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2 mt-0.5">
             {previewText || <span className="italic">Media or attachment</span>}
-            {parent.content.length > 120 && '…'}
+            {displayParent.content.length > 120 && '…'}
           </p>
         </div>
       </div>
@@ -119,8 +121,9 @@ export function ReplyingToChip({
   })();
 
   // Compact snippet of the parent post, stripped of media/URLs/embeds.
-  const snippet = parent
-    ? stripMediaUrls(parent.content)
+  const snippetParent = parent ? (tryExtractEmbeddedEvent(parent) ?? parent) : null;
+  const snippet = snippetParent
+    ? stripMediaUrls(snippetParent.content)
         .replace(/https?:\/\/\S+/g, '')
         .replace(/\s+/g, ' ')
         .trim()

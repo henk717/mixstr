@@ -81,6 +81,7 @@ export const READABILITY_EXEMPT_KINDS = new Set<number>([
   34235, // video event
   34236, // audio event (video wrapper)
   34550, // community definition
+  4550, // community post approval (content is JSON-encoded original post)
   31922, // calendar event
   31923, // calendar event rsvp
   30315, // status

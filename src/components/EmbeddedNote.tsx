@@ -6,7 +6,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { relativeTime } from '@/lib/postUtils';
+import { relativeTime, tryExtractEmbeddedEvent } from '@/lib/postUtils';
 
 interface EmbeddedNoteProps {
   eventId: string;
@@ -99,9 +99,11 @@ export function EmbeddedNote({ eventId, relays, authorHint, className, depth = 0
 }
 
 function EmbeddedNoteBody({ event, depth }: { event: NostrEvent; depth: number }) {
-  const author = useAuthor(event.pubkey);
+  // A quoted note can itself be a repost/community-approval wrapper.
+  const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
+  const author = useAuthor(displayEvent.pubkey);
   const meta = author.data?.metadata;
-  const displayName = meta?.display_name || meta?.name || event.pubkey.slice(0, 10) + '…';
+  const displayName = meta?.display_name || meta?.name || displayEvent.pubkey.slice(0, 10) + '…';
 
   // Lazy import NoteContent to avoid circular dependency — only used at depth < MAX_DEPTH
   // We render it with disableNoteEmbeds and disableMediaEmbeds to keep embedded cards compact
@@ -116,9 +118,9 @@ function EmbeddedNoteBody({ event, depth }: { event: NostrEvent; depth: number }
           </AvatarFallback>
         </Avatar>
         <span className="font-semibold text-foreground text-xs truncate">{displayName}</span>
-        <span className="text-xs text-muted-foreground ml-auto shrink-0">{relativeTime(event.created_at)}</span>
+        <span className="text-xs text-muted-foreground ml-auto shrink-0">{relativeTime(displayEvent.created_at)}</span>
       </div>
-      <EmbeddedNoteContent event={event} depth={depth} />
+      <EmbeddedNoteContent event={displayEvent} depth={depth} />
     </div>
   );
 }

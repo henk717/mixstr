@@ -41,6 +41,7 @@ export interface ListSource {
   // community (NIP-72)
   communityId?: string;        // "34550:<pubkey>:<d-tag>"
   communityPubkey?: string;
+  showUnapproved?: boolean;    // If true (or user is a moderator), include posts without a kind 4550 approval
 
   // group (NIP-29)
   groupId?: string;

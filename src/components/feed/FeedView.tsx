@@ -9,9 +9,17 @@ import { LivestreamCard } from './LivestreamCard';
 import { InfiniteScrollSentinel } from './InfiniteScrollSentinel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
-import { hasMedia, isLivestream, getAudioTrackInfo, getLivestreamInfo, getMediaDuration } from '@/lib/postUtils';
+import { hasMedia, isLivestream, getAudioTrackInfo, getLivestreamInfo, getMediaDuration, tryExtractEmbeddedEvent } from '@/lib/postUtils';
 import type { ListViewOptions } from '@/lib/sidebarLists';
 import { useMuteList } from '@/hooks/useMuteList';
+
+/** Moderation controls passed through the feed to post cards. */
+export interface FeedModeration {
+  /** Returns true if the current user can approve this specific post. */
+  canApprove: (event: NostrEvent) => boolean;
+  /** Called when the approve button is pressed. */
+  onApprove: (event: NostrEvent) => void;
+}
 
 /** Helper to check livestream status without importing extra */
 function getLivestreamStatus(event: NostrEvent): string {
@@ -32,26 +40,35 @@ interface FeedViewProps {
   showLivestreamsAtTop?: boolean;
   /** Per-list view options (duration filter etc.) */
   viewOptions?: ListViewOptions;
+  /** Optional community moderation controls. */
+  moderation?: FeedModeration;
 }
 
 function filterForMode(events: NostrEvent[], mode: FeedViewMode): NostrEvent[] {
+  // For wrapper events (reposts / community approvals) judge by the embedded post.
+  const subject = (e: NostrEvent) => tryExtractEmbeddedEvent(e) ?? e;
+
   switch (mode) {
     case 'media':
-      return events.filter((e) => isLivestream(e) || hasMedia(e) || e.kind === 20 || e.kind === 34235);
+      return events.filter((e) => {
+        const s = subject(e);
+        return isLivestream(s) || hasMedia(s) || s.kind === 20 || s.kind === 34235;
+      });
     case 'audio':
       // getAudioTrackInfo is the strict gate — must return a URL to pass
       // Livestreams only pass if they have an actual streaming URL (HLS/MP4 in the streaming tag)
       return events.filter((e) => {
-        if (e.kind === 31337 || e.kind === 34236) return true;
-        const trackInfo = getAudioTrackInfo(e);
+        const s = subject(e);
+        if (s.kind === 31337 || s.kind === 34236) return true;
+        const trackInfo = getAudioTrackInfo(s);
         if (!trackInfo) return false;
         // Reject if the "url" only resolves to what looks like an image
         const url = trackInfo.url.toLowerCase();
         if (/\.(jpe?g|png|gif|webp|avif|svg)(\?.*)?$/.test(url)) return false;
         return true;
       });
-    case 'short':
     case 'longform':
+    case 'short':
     default:
       return events;
   }
@@ -67,6 +84,7 @@ export function FeedView({
   fetchNextPage,
   showLivestreamsAtTop = false,
   viewOptions,
+  moderation,
 }: FeedViewProps) {
   const { isMuted } = useMuteList();
 
@@ -150,43 +168,55 @@ export function FeedView({
       {/* Regular content */}
       {mode === 'media' && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4">
-          {regularEvents.map((event) =>
-            isLivestream(event) ? (
+          {regularEvents.map((event) => {
+            const mod = moderation?.canApprove(event)
+              ? { onApprove: () => moderation.onApprove(event) }
+              : undefined;
+            return isLivestream(event) ? (
               // Livestreams get a full-width slot in the grid (span 2 cols on small, 3 on md)
               <div key={event.id} className="col-span-2 md:col-span-3">
                 <LivestreamCard event={event} />
               </div>
             ) : (
-              <MediaCard key={event.id} event={event} />
-            ),
-          )}
+              <MediaCard key={event.id} event={event} moderation={mod} />
+            );
+          })}
         </div>
       )}
 
-      {mode === 'audio' && regularEvents.map((event) =>
-        isLivestream(event) ? (
+      {mode === 'audio' && regularEvents.map((event) => {
+        const mod = moderation?.canApprove(event)
+          ? { onApprove: () => moderation.onApprove(event) }
+          : undefined;
+        return isLivestream(event) ? (
           <LivestreamCard key={event.id} event={event} />
         ) : (
-          <AudioCard key={event.id} event={event} />
-        ),
-      )}
+          <AudioCard key={event.id} event={event} moderation={mod} />
+        );
+      })}
 
-      {mode === 'longform' && regularEvents.map((event) =>
-        isLivestream(event) ? (
+      {mode === 'longform' && regularEvents.map((event) => {
+        const mod = moderation?.canApprove(event)
+          ? { onApprove: () => moderation.onApprove(event) }
+          : undefined;
+        return isLivestream(event) ? (
           <LivestreamCard key={event.id} event={event} />
         ) : (
-          <LongPostCard key={event.id} event={event} />
-        ),
-      )}
+          <LongPostCard key={event.id} event={event} moderation={mod} />
+        );
+      })}
 
       {(mode === 'short' || (mode !== 'media' && mode !== 'audio' && mode !== 'longform')) &&
-        regularEvents.map((event) =>
-          isLivestream(event) ? (
+        regularEvents.map((event) => {
+          const mod = moderation?.canApprove(event)
+            ? { onApprove: () => moderation.onApprove(event) }
+            : undefined;
+          return isLivestream(event) ? (
             <LivestreamCard key={event.id} event={event} />
           ) : (
-            <ShortPostCard key={event.id} event={event} />
-          ),
-        )
+            <ShortPostCard key={event.id} event={event} moderation={mod} />
+          );
+        })
       }
 
       {isPaginated && (
