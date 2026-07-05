@@ -21,5 +21,6 @@ export function useFollowing() {
     },
     enabled: !!user?.pubkey,
     staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
 }

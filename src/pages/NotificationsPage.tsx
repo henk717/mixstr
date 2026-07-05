@@ -8,12 +8,13 @@ import { LoginArea } from '@/components/auth/LoginArea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
-import { Heart, Repeat2, MessageCircle, Zap, Bell } from 'lucide-react';
+import { Heart, Repeat2, MessageCircle, Zap, Bell, RefreshCw } from 'lucide-react';
 import { relativeTime } from '@/lib/postUtils';
 import { nip19 } from 'nostr-tools';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 function kindIcon(kind: number) {
   switch (kind) {
@@ -42,14 +43,45 @@ function kindBg(kind: number) {
   }
 }
 
-/** Looks up the event ID that was referenced (the post being replied/reacted to) */
+/** The last 'e' tag is the most specific reference (reply target or reacted post) */
 function getReferencedEventId(event: NostrEvent): string | null {
-  // For kind 9735 zaps, 'e' tag points to the zapped event
-  // For kind 7 reactions and kind 1 replies, 'e' tag points to the referenced post
-  // Use the last 'e' tag (by convention the root is first, reply target is last)
   const eTags = event.tags.filter(([t]) => t === 'e');
   if (eTags.length === 0) return null;
   return eTags[eTags.length - 1][1] ?? null;
+}
+
+/**
+ * Decide where clicking a notification should navigate.
+ *  - Reply (kind 1): go to the reply itself
+ *  - Reaction/repost/zap: go to the original post that was reacted to
+ */
+function notificationTarget(event: NostrEvent, referencedEvent: NostrEvent | null | undefined): string | null {
+  if (event.kind === 1) {
+    // Go to the reply itself
+    try {
+      return '/' + nip19.neventEncode({ id: event.id, author: event.pubkey, kind: 1 });
+    } catch {
+      return null;
+    }
+  }
+  // For reactions/reposts/zaps, go to the post that was acted on
+  if (referencedEvent) {
+    try {
+      return '/' + nip19.neventEncode({ id: referencedEvent.id, author: referencedEvent.pubkey, kind: referencedEvent.kind });
+    } catch {
+      return null;
+    }
+  }
+  // Fall back to the notification event itself
+  const refId = getReferencedEventId(event);
+  if (refId) {
+    try {
+      return '/' + nip19.neventEncode({ id: refId, kind: 1 });
+    } catch {
+      return '/' + refId;
+    }
+  }
+  return null;
 }
 
 function NotificationItem({
@@ -59,30 +91,37 @@ function NotificationItem({
   event: NostrEvent;
   referencedEvent?: NostrEvent | null;
 }) {
+  const navigate = useNavigate();
   const author = useAuthor(event.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(event.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
 
-  // For replies: show the reply text (event.content)
-  // For reactions: show "+" or the reaction content
-  // For reposts: no content to show typically
   const showReplyContent = event.kind === 1 && event.content.trim().length > 0;
   const showReactionContent = event.kind === 7 && event.content !== '+' && event.content.trim().length > 0;
-
-  // The original post snippet to show as context
   const originalContent = referencedEvent?.content?.trim();
+
+  const target = notificationTarget(event, referencedEvent);
+
+  const handleRowClick = () => {
+    if (target) navigate(target);
+  };
 
   return (
     <div
+      role={target ? 'button' : undefined}
+      tabIndex={target ? 0 : undefined}
+      onKeyDown={target ? (e) => { if (e.key === 'Enter' || e.key === ' ') handleRowClick(); } : undefined}
+      onClick={target ? handleRowClick : undefined}
       className={cn(
-        'flex items-start gap-3 px-4 py-4 border-b border-border border-l-2 hover:bg-accent/10 transition-colors',
+        'flex items-start gap-3 px-4 py-4 border-b border-border border-l-2 transition-colors',
         kindBg(event.kind),
+        target && 'cursor-pointer hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
       )}
     >
       {/* Avatar with action badge */}
-      <div className="relative flex-shrink-0">
+      <div className="relative flex-shrink-0" onClick={(e) => e.stopPropagation()}>
         <Link to={`/${npub}`}>
           <Avatar className="w-10 h-10">
             <AvatarImage src={meta?.picture} />
@@ -99,7 +138,11 @@ function NotificationItem({
       <div className="flex-1 min-w-0">
         {/* Who did what */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <Link to={`/${npub}`} className="font-semibold text-sm hover:text-primary transition-colors">
+          <Link
+            to={`/${npub}`}
+            className="font-semibold text-sm hover:text-primary transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
             {displayName}
           </Link>
           <span className="text-sm text-muted-foreground">{kindLabel(event.kind)}</span>
@@ -108,7 +151,7 @@ function NotificationItem({
           </span>
         </div>
 
-        {/* The reply content (what THEY wrote) */}
+        {/* Reply content */}
         {showReplyContent && (
           <p className="text-sm text-foreground mt-1.5 leading-snug line-clamp-3">
             {event.content}
@@ -120,7 +163,7 @@ function NotificationItem({
           <p className="text-sm text-foreground mt-1">{event.content}</p>
         )}
 
-        {/* Original post context */}
+        {/* Original post context — also clickable */}
         {originalContent && (
           <div className="mt-2 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 text-xs text-muted-foreground line-clamp-2">
             {originalContent}
@@ -134,15 +177,13 @@ function NotificationItem({
 function NotificationsWithContext({ notifications }: { notifications: NostrEvent[] }) {
   const { nostr } = useNostr();
 
-  // Collect all referenced event IDs
   const refIds = notifications
     .map(getReferencedEventId)
     .filter((id): id is string => id !== null);
 
-  // Batch-fetch all referenced events in one query
   const refQuery = useQueries({
     queries: refIds.length > 0 ? [{
-      queryKey: ['nostr', 'ref-events', refIds.sort().join(',')],
+      queryKey: ['nostr', 'ref-events', refIds.slice().sort().join(',')],
       queryFn: async ({ signal }: { signal: AbortSignal }) => {
         const events = await nostr.query(
           [{ ids: refIds, limit: refIds.length }],
@@ -178,7 +219,7 @@ function NotificationsWithContext({ notifications }: { notifications: NostrEvent
 export function NotificationsPage() {
   useSeoMeta({ title: 'Notifications · Mixstr' });
   const { user } = useCurrentUser();
-  const { data: notifications = [], isLoading } = useNotifications();
+  const { data: notifications = [], isLoading, refetch, isFetching } = useNotifications();
 
   if (!user) {
     return (
@@ -196,6 +237,15 @@ export function NotificationsPage() {
         <div className="px-4 py-4 flex items-center gap-2">
           <Bell size={20} className="text-primary" />
           <h1 className="text-lg font-bold">Notifications</h1>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="w-8 h-8 ml-auto text-muted-foreground hover:text-primary"
+            onClick={() => refetch()}
+            title="Refresh"
+          >
+            <RefreshCw size={15} className={isFetching ? 'animate-spin' : ''} />
+          </Button>
         </div>
       </div>
 

@@ -14,7 +14,7 @@ export function useAuthor(pubkey: string | undefined) {
 
       const [event] = await nostr.query(
         [{ kinds: [0], authors: [pubkey!], limit: 1 }],
-        { signal: AbortSignal.timeout(1500) },
+        { signal: AbortSignal.timeout(6000) },
       );
 
       if (!event) {
@@ -28,7 +28,8 @@ export function useAuthor(pubkey: string | undefined) {
         return { event };
       }
     },
-    staleTime: 5 * 60 * 1000, // Keep cached data fresh for 5 minutes
-    retry: 3,
+    staleTime: 2 * 60 * 1000,   // Re-fetch profiles after 2 minutes
+    retry: 2,
+    refetchOnWindowFocus: true,
   });
 }

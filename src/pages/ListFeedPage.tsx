@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useSeoMeta } from '@unhead/react';
 import { RefreshCw, Pencil } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useMixstr } from '@/hooks/useMixstr';
 import { useListFeed } from '@/hooks/useListFeed';
 import { useRssFeed } from '@/hooks/useRssFeed';
@@ -28,7 +29,9 @@ export function ListFeedPage() {
   const { id } = useParams<{ id: string }>();
   const { sidebarLists, updateSidebarList, feedViewModes, setFeedViewMode } = useMixstr();
   const [editOpen, setEditOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const { isMuted } = useMuteList();
+  const queryClient = useQueryClient();
 
   const list = sidebarLists.find((l) => l.id === id);
   const feedKey = `list:${id}`;
@@ -69,9 +72,20 @@ export function ListFeedPage() {
 
   const isLoading = nostrLoading || (hasRssSources && rssLoading);
 
-  function handleRefetch() {
-    void refetchNostr();
-    if (hasRssSources) void refetchRss();
+  async function handleRefetch() {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      // Invalidate the query cache so the data is marked stale and re-fetched
+      await queryClient.invalidateQueries({ queryKey: ['nostr', 'list-feed-infinite', id] });
+      await queryClient.invalidateQueries({ queryKey: ['nostr', 'list-dvm-results', id] });
+      await Promise.all([
+        refetchNostr(),
+        hasRssSources ? refetchRss() : Promise.resolve(),
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
   }
 
   // Build interleaved timeline for short mode when RSS sources exist
@@ -129,11 +143,11 @@ export function ListFeedPage() {
               variant="ghost"
               size="icon"
               className="w-8 h-8 text-muted-foreground hover:text-primary"
-              onClick={handleRefetch}
-              disabled={isLoading}
+              onClick={() => void handleRefetch()}
+              disabled={isRefreshing || isLoading}
               title="Refresh"
             >
-              <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} />
+              <RefreshCw size={15} className={isRefreshing || isLoading ? 'animate-spin' : ''} />
             </Button>
             <Button
               variant="ghost"

@@ -43,6 +43,7 @@ export function useMuteList() {
     },
     enabled: !!user?.pubkey,
     staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: true,
   });
 
   const muted = parseMuteEvent(muteEvent ?? undefined);

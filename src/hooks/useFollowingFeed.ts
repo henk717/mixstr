@@ -49,6 +49,7 @@ export function useFollowingFeed() {
     },
     initialPageParam: undefined as number | undefined,
     enabled: following.length > 0,
-    staleTime: 30 * 1000,
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
   });
 }

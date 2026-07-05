@@ -109,17 +109,22 @@ export function useMixstrSync({
   const hasLoadedRemote = useRef(false);
   const queryClient = useQueryClient();
 
-  // On first successful remote fetch, merge remote → local if remote is newer
+  // Reset merge-flag when user changes so we re-apply the remote config
+  // for the newly active account.
+  useEffect(() => {
+    hasLoadedRemote.current = false;
+    // When the user changes (login / logout / switch) immediately invalidate
+    // the query so the new account's config is fetched fresh.
+    queryClient.invalidateQueries({ queryKey: ['nostr', 'mixstr-config'] });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.pubkey]);
+
+  // On first successful remote fetch (per account), merge remote → local if remote is newer
   useEffect(() => {
     if (!remoteConfig || hasLoadedRemote.current) return;
     hasLoadedRemote.current = true;
     onRemoteLoaded(remoteConfig);
   }, [remoteConfig, onRemoteLoaded]);
-
-  // Reset merge-flag when user changes
-  useEffect(() => {
-    hasLoadedRemote.current = false;
-  }, [user?.pubkey]);
 
   const scheduleBackup = useCallback(() => {
     if (!user) return;

@@ -219,7 +219,7 @@ function ChatView({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-background/90 backdrop-blur flex-shrink-0">
         <button
@@ -242,8 +242,8 @@ function ChatView({
         <Lock size={12} className="text-green-500 ml-auto flex-shrink-0" title="End-to-end encrypted" />
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      {/* Messages — scrollable, fills remaining height */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 min-h-0">
         {conv.messages.length === 0 && (
           <div className="text-center text-muted-foreground text-sm py-8">
             No messages yet. Say hello!
@@ -255,8 +255,8 @@ function ChatView({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Compose */}
-      <div className="flex items-end gap-2 px-4 py-3 border-t border-border flex-shrink-0">
+      {/* Compose — always pinned at the bottom */}
+      <div className="flex items-end gap-2 px-4 py-3 border-t border-border bg-background flex-shrink-0">
         <Textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -356,88 +356,86 @@ export function MessagesPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto flex flex-col" style={{ minHeight: 'calc(100vh - 0px)' }}>
+    <div className="max-w-2xl mx-auto flex flex-col h-full">
 
-      {/* Header — only when not in a chat */}
+      {/* ── Conversation list view ── */}
       {!selectedConv && (
-        <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border flex-shrink-0">
-          <div className="px-4 py-4 flex items-center gap-2">
-            <Mail size={20} className="text-primary" />
-            <h1 className="text-lg font-bold">Messages</h1>
-            <Lock size={14} className="text-green-500 ml-1" title="End-to-end encrypted" />
-          </div>
-        </div>
-      )}
-
-      {/* Conversation list */}
-      {!selectedConv && (
-        <div className="flex-1">
-          {/* Encryption info banner */}
-          <div className="mx-4 my-3 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 flex items-start gap-2">
-            <Lock size={14} className="text-primary mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">End-to-end encrypted via NIP-17.</span>{' '}
-              Only you can read these messages. Deleted conversations are synced across all your devices.
-            </p>
-          </div>
-
-          {isLoading && (
-            <div>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border">
-                  <Skeleton className="w-11 h-11 rounded-full flex-shrink-0" />
-                  <div className="flex-1 space-y-1.5">
-                    <Skeleton className="h-3 w-28" />
-                    <Skeleton className="h-3 w-48" />
-                  </div>
-                </div>
-              ))}
+        <>
+          {/* Header */}
+          <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border flex-shrink-0">
+            <div className="px-4 py-4 flex items-center gap-2">
+              <Mail size={20} className="text-primary" />
+              <h1 className="text-lg font-bold">Messages</h1>
+              <Lock size={14} className="text-green-500 ml-1" title="End-to-end encrypted" />
             </div>
-          )}
+          </div>
 
-          {!isLoading && error && (
-            <Card className="border-destructive/30 mx-4 my-4">
-              <CardContent className="py-4 px-4 flex items-center gap-2 text-sm text-destructive">
-                <AlertCircle size={16} />
-                Failed to load messages. Please try again.
-              </CardContent>
-            </Card>
-          )}
+          <div className="flex-1 overflow-y-auto">
+            {/* Encryption info banner */}
+            <div className="mx-4 my-3 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 flex items-start gap-2">
+              <Lock size={14} className="text-primary mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">End-to-end encrypted via NIP-17.</span>{' '}
+                Only you can read these messages. Deleted conversations are synced across all your devices.
+              </p>
+            </div>
 
-          {!isLoading && !error && conversations.length === 0 && (
-            <Card className="border-dashed mx-4 my-8">
-              <CardContent className="py-12 px-8 text-center">
-                <Mail size={32} className="text-muted-foreground mx-auto mb-3" />
-                <p className="text-muted-foreground text-sm">No messages yet.</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  When someone sends you a NIP-17 encrypted message, it will appear here.
-                </p>
-              </CardContent>
-            </Card>
-          )}
+            {isLoading && (
+              <div>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border">
+                    <Skeleton className="w-11 h-11 rounded-full flex-shrink-0" />
+                    <div className="flex-1 space-y-1.5">
+                      <Skeleton className="h-3 w-28" />
+                      <Skeleton className="h-3 w-48" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
-          {conversations.map((conv) => (
-            <ConversationListItem
-              key={conv.peerPubkey}
-              conv={conv}
-              active={selectedPeer === conv.peerPubkey}
-              onSelect={() => setSelectedPeer(conv.peerPubkey)}
-              onDelete={() => handleDelete(conv.peerPubkey)}
-              isDeleting={isDeleting}
-            />
-          ))}
-        </div>
+            {!isLoading && error && (
+              <Card className="border-destructive/30 mx-4 my-4">
+                <CardContent className="py-4 px-4 flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle size={16} />
+                  Failed to load messages. Please try again.
+                </CardContent>
+              </Card>
+            )}
+
+            {!isLoading && !error && conversations.length === 0 && (
+              <Card className="border-dashed mx-4 my-8">
+                <CardContent className="py-12 px-8 text-center">
+                  <Mail size={32} className="text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm">No messages yet.</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    When someone sends you a NIP-17 encrypted message, it will appear here.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {conversations.map((conv) => (
+              <ConversationListItem
+                key={conv.peerPubkey}
+                conv={conv}
+                active={selectedPeer === conv.peerPubkey}
+                onSelect={() => setSelectedPeer(conv.peerPubkey)}
+                onDelete={() => handleDelete(conv.peerPubkey)}
+                isDeleting={isDeleting}
+              />
+            ))}
+          </div>
+        </>
       )}
 
-      {/* Chat view */}
+      {/* ── Chat view — fills the full height with sticky compose bar ── */}
       {selectedConv && (
-        <div className="flex flex-col flex-1" style={{ height: 'calc(100vh - 0px)' }}>
-          <ChatView
-            conv={selectedConv}
-            myPubkey={user.pubkey}
-            onBack={() => setSelectedPeer(null)}
-          />
-        </div>
+        <ChatView
+          conv={selectedConv}
+          myPubkey={user.pubkey}
+          onBack={() => setSelectedPeer(null)}
+        />
       )}
     </div>
   );

@@ -19,20 +19,19 @@ export function useNotifications() {
             limit: 50,
           },
         ],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
       );
-      // Filter out the user's own events (e.g. self-tags)
       const filtered = events.filter((e) => e.pubkey !== user.pubkey);
       return filtered.sort((a, b) => b.created_at - a.created_at);
     },
     enabled: !!user?.pubkey,
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
+    staleTime: 15 * 1000,        // consider fresh for 15s
+    refetchInterval: 30 * 1000,  // background poll every 30s
+    refetchOnWindowFocus: true,   // re-fetch when tab regains focus
   });
 }
 
 export function useUnreadNotificationCount() {
   const { data } = useNotifications();
-  // Simple: treat all as potentially unread (in a real app you'd track last-seen)
   return data?.length ?? 0;
 }

@@ -11,13 +11,13 @@ export function MainLayout({ children }: MainLayoutProps) {
   const { currentTrack } = useMixstr();
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen bg-background overflow-hidden">
       {/* Left Sidebar */}
       <LeftSidebar />
 
-      {/* Main content area */}
+      {/* Main content area — scrollable column */}
       <main
-        className="flex-1 min-w-0"
+        className="flex-1 min-w-0 overflow-y-auto"
         style={{ paddingBottom: currentTrack ? '88px' : '0' }}
       >
         {children}

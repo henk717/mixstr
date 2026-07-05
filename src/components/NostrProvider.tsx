@@ -56,7 +56,7 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
     reqRouter(filters: NostrFilter[]) {
       const routes = new Map<string, NostrFilter[]>();
 
-      // Route to all read relays
+      // Route to all configured read relays
       const readRelays = relayMetadataRef.current.relays
         .filter(r => r.read)
         .map(r => r.url);
@@ -65,19 +65,36 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
         routes.set(url, filters);
       }
 
+      // Always also query these well-known relays for profile and search data
+      // so the app works even when the user's relay list is sparse or missing.
+      const FALLBACK_READ_RELAYS = [
+        'wss://purplepag.es',       // profile metadata aggregator
+        'wss://relay.nostr.band',   // full-text search + global index
+        'wss://relay.ditto.pub',    // general purpose
+      ];
+      for (const url of FALLBACK_READ_RELAYS) {
+        if (!routes.has(url)) {
+          routes.set(url, filters);
+        }
+      }
+
       return routes;
     },
     eventRouter(_event: NostrEvent) {
-      // Get write relays from metadata
       const writeRelays = relayMetadataRef.current.relays
         .filter(r => r.write)
         .map(r => r.url);
 
-      const allRelays = new Set<string>(writeRelays);
+      // If no write relays configured yet, fall back to a safe default
+      if (writeRelays.length === 0) {
+        return ['wss://relay.ditto.pub'];
+      }
 
-      return [...allRelays];
+      return [...new Set<string>(writeRelays)];
     },
-    eoseTimeout: 200,
+    // 4 seconds: enough time for slow relays to send EOSE without hanging forever.
+    // The previous 200ms value caused most relays to be abandoned before responding.
+    eoseTimeout: 4000,
   }));
 
   // Derive the current signer from the active login. This mirrors the

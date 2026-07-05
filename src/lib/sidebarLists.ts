@@ -98,22 +98,40 @@ export const DEFAULT_LISTS: SidebarList[] = [
   },
 ];
 
-const STORAGE_KEY = 'mixstr:sidebar-lists';
+/** Legacy (non-namespaced) storage key — used as a fallback for migration */
+const LEGACY_STORAGE_KEY = 'mixstr:sidebar-lists';
 
-export function loadSidebarLists(): SidebarList[] {
+function storageKey(pubkey?: string): string {
+  return pubkey ? `mixstr:sidebar-lists:${pubkey}` : LEGACY_STORAGE_KEY;
+}
+
+export function loadSidebarLists(pubkey?: string): SidebarList[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_LISTS;
-    const parsed = JSON.parse(raw) as SidebarList[];
-    if (!Array.isArray(parsed)) return DEFAULT_LISTS;
-    return parsed;
+    // Try the namespaced key first
+    const namespacedKey = storageKey(pubkey);
+    const namespaced = localStorage.getItem(namespacedKey);
+    if (namespaced) {
+      const parsed = JSON.parse(namespaced) as SidebarList[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+
+    // If logged-out / no pubkey, fall back to the anonymous/legacy store
+    if (!pubkey) {
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (legacy) {
+        const parsed = JSON.parse(legacy) as SidebarList[];
+        if (Array.isArray(parsed)) return parsed;
+      }
+    }
+
+    return DEFAULT_LISTS;
   } catch {
     return DEFAULT_LISTS;
   }
 }
 
-export function saveSidebarLists(lists: SidebarList[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(lists));
+export function saveSidebarLists(lists: SidebarList[], pubkey?: string): void {
+  localStorage.setItem(storageKey(pubkey), JSON.stringify(lists));
 }
 
 export function createListId(): string {

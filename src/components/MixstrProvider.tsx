@@ -6,6 +6,7 @@ import {
   type SidebarList,
 } from '@/lib/sidebarLists';
 import { useMixstrSync, type MixstrConfig } from '@/hooks/useMixstrBackup';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 function MixstrSyncInner({
   sidebarLists,
@@ -29,8 +30,13 @@ function MixstrSyncInner({
 }
 
 export function MixstrProvider({ children }: { children: ReactNode }) {
+  const { user } = useCurrentUser();
+  const activePubkeyRef = useRef<string | undefined>(undefined);
+
   const [feedViewModes, setFeedViewModes] = useState<Record<string, FeedViewMode>>({});
-  const [sidebarLists, setSidebarListsState] = useState<SidebarList[]>(() => loadSidebarLists());
+  const [sidebarLists, setSidebarListsState] = useState<SidebarList[]>(() =>
+    loadSidebarLists(undefined),
+  );
   const [audioQueue, setAudioQueue] = useState<AudioTrack[]>([]);
   const [currentTrack, setCurrentTrack] = useState<AudioTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -38,6 +44,23 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const [audioDuration, setAudioDuration] = useState(0);
   const currentIndexRef = useRef<number>(-1);
   const scheduleBackupRef = useRef<() => void>(() => {});
+
+  // ── Reload lists when the active account changes ──────────────────────────
+  // This runs whenever `user` changes (login / logout / switch).
+  // We compare the pubkey to avoid re-running on unrelated re-renders.
+  useEffect(() => {
+    const newPubkey = user?.pubkey;
+    if (newPubkey === activePubkeyRef.current) return;
+
+    activePubkeyRef.current = newPubkey;
+
+    // Load the lists that belong to this account (or defaults if none stored)
+    const lists = loadSidebarLists(newPubkey);
+    setSidebarListsState(lists);
+
+    // Reset view modes — they'll be restored from the Nostr backup if available
+    setFeedViewModes({});
+  }, [user?.pubkey]);
 
   const setFeedViewMode = useCallback((feedKey: string, mode: FeedViewMode) => {
     setFeedViewModes((prev) => {
@@ -55,7 +78,7 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
       const remoteTs = config.savedAt ?? 0;
       const localMaxTs = Math.max(...local.map((l) => l.createdAt ?? 0), 0);
       if (remoteTs > localMaxTs) {
-        saveSidebarLists(config.sidebarLists);
+        saveSidebarLists(config.sidebarLists, activePubkeyRef.current);
         return config.sidebarLists;
       }
       return local;
@@ -74,14 +97,14 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   // Sidebar list management
   const setSidebarLists = useCallback((lists: SidebarList[]) => {
     setSidebarListsState(lists);
-    saveSidebarLists(lists);
+    saveSidebarLists(lists, activePubkeyRef.current);
     setTimeout(() => scheduleBackupRef.current(), 0);
   }, []);
 
   const addSidebarList = useCallback((list: SidebarList) => {
     setSidebarListsState((prev) => {
       const next = [...prev, list];
-      saveSidebarLists(next);
+      saveSidebarLists(next, activePubkeyRef.current);
       setTimeout(() => scheduleBackupRef.current(), 0);
       return next;
     });
@@ -90,7 +113,7 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const updateSidebarList = useCallback((id: string, patch: Partial<SidebarList>) => {
     setSidebarListsState((prev) => {
       const next = prev.map((l) => (l.id === id ? { ...l, ...patch } : l));
-      saveSidebarLists(next);
+      saveSidebarLists(next, activePubkeyRef.current);
       setTimeout(() => scheduleBackupRef.current(), 0);
       return next;
     });
@@ -99,7 +122,7 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const removeSidebarList = useCallback((id: string) => {
     setSidebarListsState((prev) => {
       const next = prev.filter((l) => l.id !== id);
-      saveSidebarLists(next);
+      saveSidebarLists(next, activePubkeyRef.current);
       setTimeout(() => scheduleBackupRef.current(), 0);
       return next;
     });
