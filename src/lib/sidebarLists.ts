@@ -96,16 +96,7 @@ export interface SidebarList {
   viewOptions?: ListViewOptions;
 }
 
-export const DEFAULT_LISTS: SidebarList[] = [
-  {
-    id: 'following',
-    label: 'Following',
-    icon: 'home',
-    sources: [{ id: 'following-feed', type: 'people', label: 'My following list' }],
-    pinned: true,
-    createdAt: 0,
-  },
-];
+export const DEFAULT_LISTS: SidebarList[] = [];
 
 /** Legacy (non-namespaced) storage key — used as a fallback for migration */
 const LEGACY_STORAGE_KEY = 'mixstr:sidebar-lists';
