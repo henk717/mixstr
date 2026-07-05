@@ -1,5 +1,5 @@
 import { useSeoMeta } from '@unhead/react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, MessageCircle } from 'lucide-react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
@@ -8,17 +8,22 @@ import { nip19 } from 'nostr-tools';
 import { PostAuthor } from '@/components/feed/PostAuthor';
 import { PostActions } from '@/components/feed/PostActions';
 import { NoteContent } from '@/components/NoteContent';
+import { ReplyParentPreview, ReplyingToChip } from '@/components/feed/ReplyContext';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useParentEvent } from '@/hooks/useParentEvent';
 import {
   getEventTitle,
   getCoverImage,
   getSummary,
   isLongform,
   relativeTime,
+  isReply,
+  getParentEventId,
+  eventToNevent,
 } from '@/lib/postUtils';
 
 interface EventDetailPageProps {
@@ -91,13 +96,34 @@ function BackButton() {
 }
 
 function EventDetailBody({ event }: { event: NostrEvent }) {
+  const navigate = useNavigate();
   const longform = isLongform(event);
   const title = getEventTitle(event);
   const cover = getCoverImage(event);
   const summary = getSummary(event);
 
+  const reply = isReply(event);
+  const parentRef = reply ? getParentEventId(event) : null;
+  const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
+
   return (
     <>
+      {/* Parent context above a reply */}
+      {reply && parentRef && (
+        <div className="border-b border-border">
+          {parentEvent ? (
+            <ReplyParentPreview
+              parent={parentEvent}
+              onParentClick={() => navigate(`/${eventToNevent(parentEvent)}`)}
+            />
+          ) : (
+            <div className="pt-2 pb-0">
+              <ReplyingToChip parentId={parentRef.id} isPending={parentPending} />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main post */}
       <div className="px-4 py-5 border-b border-border">
         <PostAuthor pubkey={event.pubkey} createdAt={event.created_at} />
