@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Search } from 'lucide-react';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
 import { ShortPostCard } from '@/components/feed/ShortPostCard';
+import { InfiniteScrollSentinel } from '@/components/feed/InfiniteScrollSentinel';
 import type { NostrEvent } from '@nostrify/nostrify';
 
 function PeopleResult({ event }: { event: NostrEvent }) {
@@ -45,11 +46,19 @@ function PeopleResult({ event }: { event: NostrEvent }) {
 export function ExplorePage() {
   useSeoMeta({ title: 'Explore · Mixstr' });
   const [query, setQuery] = useState('');
-  const debouncedQuery = useDebounce(query, 400);
-  const { people, posts, isLoading } = useExploreSearch(debouncedQuery);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const debouncedQuery = useDebounce(query, 250);
+  const { people, posts, isLoading, isFetchingNextPage, hasNextPage, fetchNextPage } =
+    useExploreSearch(debouncedQuery);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setQuery(e.target.value);
+  }, []);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      inputRef.current?.blur();
+    }
   }, []);
 
   const hasQuery = debouncedQuery.trim().length > 0;
@@ -68,10 +77,12 @@ export function ExplorePage() {
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
+              ref={inputRef}
               placeholder="Search people and posts…"
               className="pl-9 bg-muted border-transparent focus:border-primary"
               value={query}
               onChange={handleChange}
+              onKeyDown={handleKeyDown}
               autoFocus
             />
           </div>
@@ -149,6 +160,11 @@ export function ExplorePage() {
               {posts.map((event) => (
                 <ShortPostCard key={event.id} event={event} />
               ))}
+              <InfiniteScrollSentinel
+                hasNextPage={hasNextPage}
+                isFetchingNextPage={isFetchingNextPage}
+                fetchNextPage={fetchNextPage}
+              />
             </div>
           )}
 
