@@ -35,12 +35,14 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
 
   // Reposts and community approvals wrap the real post as JSON in content.
   const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
+  const isRss = isRssSyntheticEvent(displayEvent);
+  const rssLink = isRss ? displayEvent.tags.find(([k]) => k === 'link')?.[1] : undefined;
+  const rssFeedTitle = isRss ? displayEvent.tags.find(([k]) => k === 'feedTitle')?.[1] : undefined;
 
   const author = useAuthor(isRss ? undefined : displayEvent.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(displayEvent.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
-  const rssFeedTitle = displayEvent.tags.find(([k]) => k === 'feedTitle')?.[1];
   const displayName = isRss
     ? (rssFeedTitle ?? 'RSS Feed')
     : rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
@@ -54,8 +56,6 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   const isEmbed = embeds.length > 0 && !isVideo;
   const embed = embeds[0];
   const title = getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim();
-  const isRss = isRssSyntheticEvent(displayEvent);
-  const rssLink = isRss ? displayEvent.tags.find(([k]) => k === 'link')?.[1] : undefined;
 
   // Choose thumbnail: explicit first, then extract a frame from the video if available.
   const thumbnail = embed?.thumbnail ?? images[0];
