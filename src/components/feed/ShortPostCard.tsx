@@ -141,7 +141,9 @@ export function ShortPostCard({ event }: ShortPostCardProps) {
                 Short view: text only — media is intentionally suppressed here and
                 shown as a collapsed strip below. disableMediaEmbeds prevents images/
                 videos from rendering inline so the strip stays the gatekeeper.
-                disableNoteEmbeds keeps quoted notes from adding bulk in the feed.
+                Note embeds are enabled (disableNoteEmbeds stays false) so quoted notes
+                resolve and render as cards; depth=1 ensures any media inside those
+                embedded quote cards is suppressed, keeping the short-view layout intact.
               */}
               <NoteContent
                 event={displayEvent}
@@ -150,7 +152,7 @@ export function ShortPostCard({ event }: ShortPostCardProps) {
                   !textExpanded && 'line-clamp-4',
                 )}
                 disableMediaEmbeds
-                disableNoteEmbeds={!textExpanded}
+                depth={1}
               />
 
               {isLong && !textExpanded && (

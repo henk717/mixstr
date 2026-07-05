@@ -46,6 +46,12 @@ interface NoteContentProps {
    *  whitespace) while link preview cards and other non-media embeds are preserved.
    *  Used inside embedded quote cards to keep them lightweight. */
   disableMediaEmbeds?: boolean;
+  /**
+   * Nesting depth for embedded note cards. A depth >= 1 suppresses media inside
+   * embedded notes so parent contexts (e.g. short-view feed cards) keep control
+   * over image/video placement.
+   */
+  depth?: number;
 }
 
 /** Regex matching `:shortcode:` patterns in text. */
@@ -255,6 +261,7 @@ export function NoteContent({
   hideEmbedImages = false,
   disableNoteEmbeds = false,
   disableMediaEmbeds = false,
+  depth = 0,
 }: NoteContentProps) {
   const tokens = useMemo(() => {
     const text = event.content;
@@ -720,7 +727,7 @@ export function NoteContent({
                 </Link>
               );
             }
-            return <EmbeddedNote key={i} eventId={token.eventId} relays={token.relays} authorHint={token.author} className="my-2.5" />;
+            return <EmbeddedNote key={i} eventId={token.eventId} relays={token.relays} authorHint={token.author} className="my-2.5" depth={depth + 1} />;
           case 'naddr-embed':
             if (disableNoteEmbeds) {
               const naddrId = nip19.naddrEncode({ kind: token.addr.kind, pubkey: token.addr.pubkey, identifier: token.addr.identifier });
