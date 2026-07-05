@@ -31,7 +31,6 @@ export function HomeFeed() {
   const mode = feedViewModes[FEED_KEY] ?? 'short';
   const pages = useMemo(() => data?.pages ?? [], [data]);
   const isLoading = followingLoading || feedLoading;
-  const isMobile = useIsMobile();
 
   const [composeOpen, setComposeOpen] = useState(false);
 
