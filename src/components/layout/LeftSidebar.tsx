@@ -16,7 +16,10 @@ import {
   LogOut,
   UserPlus,
   ChevronDown,
+  Wifi,
 } from 'lucide-react';
+import { useRelayMonitor } from '@/hooks/useRelayMonitor';
+import { RelayMonitorDialog } from '@/components/RelayMonitorDialog';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNotifications } from '@/hooks/useNotifications';
@@ -95,6 +98,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { currentUser, otherUsers, isLoading: accountsLoading, setLogin, removeLogin } = useLoggedInAccounts();
   const [editDialog, setEditDialog] = useState<{ open: boolean; list?: SidebarList }>({ open: false });
   const [authOpen, setAuthOpen] = useState(false);
+  const [relayMonitorOpen, setRelayMonitorOpen] = useState(false);
+  const { connectedCount, totalCount } = useRelayMonitor();
 
   const notifCount = notifications?.length ?? 0;
   const npub = user ? nip19.npubEncode(user.pubkey) : null;
@@ -371,17 +376,52 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         )}
       </div>
 
-      {/* Shakespeare credit */}
-      <div className="text-center pb-1">
+      {/* Relay indicator + Shakespeare credit */}
+      <div className="pb-1 flex items-center justify-between px-1">
+        {/* Relay connection indicator */}
+        <button
+          onClick={() => setRelayMonitorOpen(true)}
+          className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-accent transition-colors group"
+          title={`${connectedCount} of ${totalCount} relays connected — click to monitor`}
+        >
+          <span className="relative flex-shrink-0">
+            <Wifi
+              size={14}
+              className={cn(
+                'transition-colors',
+                connectedCount > 0 ? 'text-green-500' : 'text-muted-foreground/50',
+              )}
+            />
+            {connectedCount > 0 && (
+              <span className="absolute -top-0.5 -right-1 min-w-[14px] h-3.5 flex items-center justify-center bg-primary text-primary-foreground text-[8px] font-bold rounded-full px-0.5 leading-none">
+                {connectedCount}
+              </span>
+            )}
+          </span>
+          <span className={cn(
+            'text-[10px] tabular-nums transition-colors',
+            connectedCount > 0 ? 'text-muted-foreground/70 group-hover:text-foreground' : 'text-muted-foreground/40',
+          )}>
+            {connectedCount}/{totalCount}
+          </span>
+        </button>
+
+        {/* Shakespeare credit */}
         <a
           href="https://shakespeare.diy"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
+          className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors pr-1"
         >
           Vibed with Shakespeare
         </a>
       </div>
+
+      {/* Relay monitor dialog */}
+      <RelayMonitorDialog
+        open={relayMonitorOpen}
+        onClose={() => setRelayMonitorOpen(false)}
+      />
 
       {/* Edit/Add list dialog */}
       <EditListDialog

@@ -1,55 +1,38 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useNostr } from '@nostrify/react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAppContext } from '@/hooks/useAppContext';
 
 /**
- * Maximum number of gossip relays we add on top of the user's own relays.
- * These come from scanning NIP-65 (kind 10002) events of profiles we encounter.
+ * Maximum number of active gossip relays we add on top of the user's own relays.
+ * Together with the user's own relays this caps total connections at 50.
  */
 export const GOSSIP_RELAY_LIMIT = 50;
 
 /**
- * How often (ms) we score and trim the gossip relay set.
+ * How many followed pubkeys to batch per kind-10002 query.
  */
-const SCORE_INTERVAL = 60_000; // 1 minute
-
-/**
- * How often (ms) we batch-fetch kind 10002 for unseen pubkeys.
- */
-const FETCH_INTERVAL = 30_000; // 30 seconds
-
-/**
- * Maximum batch size for kind-10002 queries.
- */
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 150;
 
 // ── Shared singleton state (module-level so it survives hook re-renders) ────
 
-/** Pubkeys we have seen but not yet fetched a kind-10002 for */
-const pendingPubkeys = new Set<string>();
-/** Pubkeys we have already fetched */
-const fetchedPubkeys = new Set<string>();
-/** relay URL → score (number of profiles that list this relay) */
+/** relay URL → score (number of followed profiles that list this relay) */
 const relayScores = new Map<string, number>();
+
 /** Current top-N gossip relay list (read by NostrProvider) */
 let gossipRelays: string[] = [];
-
-/** Register that a pubkey has been "seen" (call whenever you render an event) */
-export function registerGossipPubkey(pubkey: string) {
-  if (!fetchedPubkeys.has(pubkey)) {
-    pendingPubkeys.add(pubkey);
-  }
-}
 
 /** Returns the current gossip relay list (snapshot at call time) */
 export function getGossipRelays(): string[] {
   return gossipRelays;
 }
 
-/** Recompute and trim gossip relay list from scores */
-function rebuildGossipRelays() {
+/** Recompute and trim gossip relay list from scores, excluding user's own pinned relays */
+function rebuildGossipRelays(excludeUrls: Set<string>, limit: number) {
   const sorted = [...relayScores.entries()]
+    .filter(([url]) => !excludeUrls.has(url))
     .sort((a, b) => b[1] - a[1])
-    .slice(0, GOSSIP_RELAY_LIMIT)
+    .slice(0, limit)
     .map(([url]) => url);
   gossipRelays = sorted;
 }
@@ -57,72 +40,106 @@ function rebuildGossipRelays() {
 /**
  * useRelayGossip
  *
- * Mount this once (in NostrProvider or App).  It:
- *  1. Periodically drains `pendingPubkeys` in batches, querying kind 10002.
- *  2. Scores each relay URL by how many profiles declare it.
- *  3. Rebuilds the `gossipRelays` list (top-N).
- *  4. Calls `onUpdate` whenever the list changes, so the pool can be reconfigured.
+ * Mount this once (in NostrProvider).  When the user is logged in and has
+ * relays configured, it:
+ *  1. Fetches the user's following list (kind 3).
+ *  2. Batch-queries kind 10002 (NIP-65) for all followed pubkeys.
+ *  3. Scores each relay URL by how many followed profiles declare it.
+ *  4. Builds the gossip relay list: top-N relays NOT already in the user's
+ *     own relay list, up to (GOSSIP_RELAY_LIMIT − pinnedCount) slots so that
+ *     total connections never exceed GOSSIP_RELAY_LIMIT.
+ *  5. Calls `onUpdate` whenever the list changes.
  */
 export function useRelayGossip(onUpdate: (relays: string[]) => void) {
   const { nostr } = useNostr();
+  const { user } = useCurrentUser();
+  const { config } = useAppContext();
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
 
   const previousListRef = useRef<string>('');
+  // Guard: only run once per (user pubkey + relay config timestamp) pair.
+  const lastRunKeyRef = useRef<string>('');
 
-  const doFetch = useCallback(async () => {
-    if (pendingPubkeys.size === 0) return;
+  const runGossipFetch = useCallback(async () => {
+    if (!user?.pubkey) return;
+    const pinnedRelays = config.relayMetadata.relays;
+    if (pinnedRelays.length === 0) return;
 
-    // Take a batch
-    const batch = [...pendingPubkeys].slice(0, BATCH_SIZE);
+    // Deduplicate runs — don't re-fetch when nothing has changed.
+    const runKey = `${user.pubkey}:${config.relayMetadata.updatedAt}`;
+    if (lastRunKeyRef.current === runKey) return;
+    lastRunKeyRef.current = runKey;
 
-    // Mark as fetched (optimistic — even if network fails we won't retry spam)
-    for (const pk of batch) {
-      pendingPubkeys.delete(pk);
-      fetchedPubkeys.add(pk);
-    }
+    console.log('[RelayGossip] Starting gossip relay fetch for user', user.pubkey.slice(0, 8));
 
     try {
-      const events = await nostr.query(
-        [{ kinds: [10002], authors: batch, limit: batch.length }],
-        { signal: AbortSignal.timeout(8_000) },
+      // Step 1: fetch the user's contact/following list (kind 3)
+      const contactEvents = await nostr.query(
+        [{ kinds: [3], authors: [user.pubkey], limit: 1 }],
+        { signal: AbortSignal.timeout(8000) }
       );
 
-      for (const event of events) {
-        for (const tag of event.tags) {
-          if (tag[0] === 'r' && typeof tag[1] === 'string') {
-            const url = tag[1].replace(/\/$/, ''); // normalise trailing slash
-            if (url.startsWith('wss://') || url.startsWith('ws://')) {
-              relayScores.set(url, (relayScores.get(url) ?? 0) + 1);
-            }
+      const followedPubkeys: string[] = [];
+      if (contactEvents.length > 0) {
+        for (const tag of contactEvents[0].tags) {
+          if (tag[0] === 'p' && typeof tag[1] === 'string' && tag[1].length === 64) {
+            followedPubkeys.push(tag[1]);
           }
         }
       }
-    } catch {
-      // Ignore network errors — we'll try remaining pending pubkeys later
-    }
-  }, [nostr]);
 
-  const doScore = useCallback(() => {
-    rebuildGossipRelays();
-    const key = gossipRelays.join(',');
-    if (key !== previousListRef.current) {
-      previousListRef.current = key;
-      onUpdateRef.current([...gossipRelays]);
+      if (followedPubkeys.length === 0) {
+        console.log('[RelayGossip] No followed pubkeys found — skipping gossip fetch');
+        return;
+      }
+
+      console.log(`[RelayGossip] Fetching NIP-65 for ${followedPubkeys.length} followed pubkeys`);
+
+      // Step 2: batch-fetch kind 10002 for all followed pubkeys
+      relayScores.clear();
+
+      for (let i = 0; i < followedPubkeys.length; i += BATCH_SIZE) {
+        const batch = followedPubkeys.slice(i, i + BATCH_SIZE);
+        try {
+          const events = await nostr.query(
+            [{ kinds: [10002], authors: batch, limit: batch.length }],
+            { signal: AbortSignal.timeout(10000) }
+          );
+
+          for (const event of events) {
+            for (const tag of event.tags) {
+              if (tag[0] === 'r' && typeof tag[1] === 'string') {
+                const url = tag[1].replace(/\/$/, ''); // normalise trailing slash
+                if (url.startsWith('wss://') || url.startsWith('ws://')) {
+                  relayScores.set(url, (relayScores.get(url) ?? 0) + 1);
+                }
+              }
+            }
+          }
+        } catch {
+          // Ignore errors on individual batches; continue with next batch
+        }
+      }
+
+      // Step 3: rebuild gossip list, excluding user's own pinned relays.
+      // Cap at (GOSSIP_RELAY_LIMIT − pinned count) so total ≤ GOSSIP_RELAY_LIMIT.
+      const pinnedSet = new Set(pinnedRelays.map(r => r.url));
+      const gossipSlots = Math.max(0, GOSSIP_RELAY_LIMIT - pinnedRelays.length);
+      rebuildGossipRelays(pinnedSet, gossipSlots);
+
+      const key = gossipRelays.join(',');
+      if (key !== previousListRef.current) {
+        previousListRef.current = key;
+        console.log(`[RelayGossip] Updated gossip relays (${gossipRelays.length}):`, gossipRelays.slice(0, 5).join(', ') + (gossipRelays.length > 5 ? '…' : ''));
+        onUpdateRef.current([...gossipRelays]);
+      }
+    } catch (err) {
+      console.warn('[RelayGossip] Gossip fetch failed:', err);
     }
-  }, []);
+  }, [nostr, user?.pubkey, config.relayMetadata]);
 
   useEffect(() => {
-    const fetchId = setInterval(() => { void doFetch(); }, FETCH_INTERVAL);
-    const scoreId = setInterval(doScore, SCORE_INTERVAL);
-
-    // Also do an initial fetch quickly
-    const initId = setTimeout(() => { void doFetch(); }, 3_000);
-
-    return () => {
-      clearInterval(fetchId);
-      clearInterval(scoreId);
-      clearTimeout(initId);
-    };
-  }, [doFetch, doScore]);
+    void runGossipFetch();
+  }, [runGossipFetch]);
 }

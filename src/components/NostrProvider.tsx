@@ -5,6 +5,12 @@ import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useRelayGossip, getGossipRelays } from '@/hooks/useRelayGossip';
+import {
+  updateRelayStatus,
+  addEventLog,
+  incrementRelayEvents,
+  type RelayEntry,
+} from '@/lib/relayMonitor';
 
 interface NostrProviderProps {
   children: React.ReactNode;
@@ -23,6 +29,66 @@ function RelayGossipSync({ gossipRelaysRef }: { gossipRelaysRef: React.RefObject
   return null;
 }
 
+/**
+ * Creates an instrumented NRelay1 that reports connection status and events
+ * to the relay monitor singleton.
+ */
+function createInstrumentedRelay(
+  url: string,
+  type: RelayEntry['type'],
+  authCallback: (challenge: string) => Promise<NostrEvent>,
+): NRelay1 {
+  updateRelayStatus(url, 'connecting', type);
+
+  const relay = new NRelay1(url, {
+    auth: async (challenge: string) => {
+      addEventLog('auth', url, 'AUTH challenge received', challenge.slice(0, 32));
+      try {
+        const event = await authCallback(challenge);
+        addEventLog('ok', url, 'AUTH signed and sent');
+        return event;
+      } catch (err) {
+        addEventLog('error', url, 'AUTH failed', String(err));
+        throw err;
+      }
+    },
+  });
+
+  // Patch the underlying WebSocket lifecycle.
+  patchRelaySocket(relay, url, type);
+
+  return relay;
+}
+
+/**
+ * Monkey-patches a relay instance to intercept WebSocket events.
+ */
+function patchRelaySocket(relay: NRelay1, url: string, type: RelayEntry['type']) {
+  try {
+    relay.addEventListener('open', () => {
+      updateRelayStatus(url, 'connected', type);
+      addEventLog('ok', url, 'Connected');
+    });
+
+    relay.addEventListener('close', () => {
+      updateRelayStatus(url, 'disconnected', type);
+      addEventLog('error', url, 'Disconnected');
+    });
+
+    relay.addEventListener('notice', (e: Event) => {
+      const detail = (e as CustomEvent).detail as string | undefined;
+      addEventLog('notice', url, 'NOTICE', detail?.slice(0, 120));
+    });
+
+    // Count inbound events
+    relay.addEventListener('event', () => {
+      incrementRelayEvents(url);
+    });
+  } catch {
+    console.warn('[RelayMonitor] Could not patch relay:', url);
+  }
+}
+
 const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   const { children } = props;
   const { config } = useAppContext();
@@ -35,46 +101,42 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   // render) to satisfy React's purity rules.
   const relayMetadataRef = useRef(config.relayMetadata);
 
-  // Gossip relays (top-N from NIP-65 scanning) — stored in a ref so the
-  // reqRouter closure always reads the latest list without recreating the pool.
+  // Gossip relays (top-N from NIP-65 scanning of followed profiles).
+  // Stored in a ref so the reqRouter closure always reads the latest list
+  // without recreating the pool.
   const gossipRelaysRef = useRef<string[]>(getGossipRelays());
 
   // Stable ref to the current user's signer for NIP-42 AUTH.
-  // The `open()` callback reads from this ref when a relay sends an AUTH
-  // challenge, so it always uses the latest signer without recreating the pool.
   const signerRef = useRef<NostrSigner | undefined>(undefined);
 
-  // Lazily create the pool once, via useState's initializer. This keeps
-  // the render body pure (no ref writes) while guaranteeing a single
-  // NPool instance per provider. The initializer runs exactly once at
-  // mount, so reading refs inside its closures is safe.
+  // Lazily create the pool once, via useState's initializer.
   // eslint-disable-next-line react-hooks/refs
   const [pool] = useState<NPool>(() => new NPool({
     open(url: string) {
-      return new NRelay1(url, {
-        // NIP-42: Respond to relay AUTH challenges by signing a kind
-        // 22242 ephemeral event with the current user's signer.
-        auth: async (challenge: string) => {
-          const signer = signerRef.current;
-          if (!signer) {
-            throw new Error('AUTH failed: no signer available (user not logged in)');
-          }
-          return signer.signEvent({
-            kind: 22242,
-            content: '',
-            tags: [
-              ['relay', url],
-              ['challenge', challenge],
-            ],
-            created_at: Math.floor(Date.now() / 1000),
-          });
-        },
+      // Determine type: pinned (user's own relays) or gossip (from follows).
+      const pinnedUrls = relayMetadataRef.current.relays.map(r => r.url);
+      const type: RelayEntry['type'] = pinnedUrls.includes(url) ? 'pinned' : 'gossip';
+
+      return createInstrumentedRelay(url, type, async (challenge: string) => {
+        const signer = signerRef.current;
+        if (!signer) {
+          throw new Error('AUTH failed: no signer available (user not logged in)');
+        }
+        return signer.signEvent({
+          kind: 22242,
+          content: '',
+          tags: [
+            ['relay', url],
+            ['challenge', challenge],
+          ],
+          created_at: Math.floor(Date.now() / 1000),
+        });
       });
     },
     reqRouter(filters: NostrFilter[]) {
       const routes = new Map<string, NostrFilter[]>();
 
-      // Route to all configured read relays
+      // Route to all configured read relays (user's own NIP-65 list).
       const readRelays = relayMetadataRef.current.relays
         .filter(r => r.read)
         .map(r => r.url);
@@ -83,21 +145,9 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
         routes.set(url, filters);
       }
 
-      // Always also query these well-known relays for profile and search data
-      // so the app works even when the user's relay list is sparse or missing.
-      const FALLBACK_READ_RELAYS = [
-        'wss://purplepag.es',       // profile metadata aggregator
-        'wss://relay.nostr.band',   // full-text search + global index
-        'wss://relay.ditto.pub',    // general purpose
-      ];
-      for (const url of FALLBACK_READ_RELAYS) {
-        if (!routes.has(url)) {
-          routes.set(url, filters);
-        }
-      }
-
-      // Add gossip relays discovered via NIP-65 scanning of encountered profiles.
-      // These are the top-N most-popular relays across everyone we've seen.
+      // Add gossip relays discovered via NIP-65 of followed profiles.
+      // These are the top-N most common relays across everyone the user follows.
+      // They supplement (never replace) the user's own relays.
       for (const url of gossipRelaysRef.current) {
         if (!routes.has(url)) {
           routes.set(url, filters);
@@ -111,21 +161,34 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
         .filter(r => r.write)
         .map(r => r.url);
 
-      // If no write relays configured yet, fall back to a safe default
-      if (writeRelays.length === 0) {
-        return ['wss://relay.ditto.pub'];
-      }
-
       return [...new Set<string>(writeRelays)];
     },
     // 4 seconds: enough time for slow relays to send EOSE without hanging forever.
-    // The previous 200ms value caused most relays to be abandoned before responding.
     eoseTimeout: 4000,
   }));
 
-  // Derive the current signer from the active login. This mirrors the
-  // logic in useCurrentUser but avoids a circular dependency (useCurrentUser
-  // depends on NostrContext which we are providing here).
+  // Instrument pool.event() to log publish attempts and outcomes.
+  useEffect(() => {
+    const originalEvent = pool.event.bind(pool);
+    pool.event = async (event: NostrEvent, opts?: { signal?: AbortSignal }) => {
+      addEventLog(
+        'publish',
+        '(all write relays)',
+        `Publishing kind ${event.kind}`,
+        event.id?.slice(0, 16),
+      );
+      try {
+        await originalEvent(event, opts);
+        addEventLog('ok', '(all write relays)', `Published kind ${event.kind} OK`, event.id?.slice(0, 16));
+      } catch (err) {
+        addEventLog('error', '(all write relays)', `Publish failed: ${String(err)}`, event.id?.slice(0, 16));
+        throw err;
+      }
+    };
+    // No cleanup needed — pool lives for the app lifetime
+  }, [pool]);
+
+  // Derive the current signer from the active login.
   const currentLogin = logins[0];
   const currentSigner = useMemo(() => {
     if (!currentLogin) return undefined;
@@ -145,8 +208,7 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
     }
   }, [currentLogin, pool]);
 
-  // Keep the ref in sync so the AUTH callback always sees the latest signer.
-  // Writing refs from an effect (not during render) satisfies purity rules.
+  // Keep the signer ref in sync.
   useEffect(() => {
     signerRef.current = currentSigner;
   }, [currentSigner]);

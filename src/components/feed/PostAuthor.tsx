@@ -1,10 +1,8 @@
-import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthor } from '@/hooks/useAuthor';
 import { relativeTime } from '@/lib/postUtils';
 import { nip19 } from 'nostr-tools';
-import { registerGossipPubkey } from '@/hooks/useRelayGossip';
 
 interface PostAuthorProps {
   pubkey: string;
@@ -14,11 +12,6 @@ interface PostAuthorProps {
 
 export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
   const author = useAuthor(pubkey);
-
-  // Register every pubkey we encounter so the gossip system can fetch
-  // their NIP-65 relay list and expand the relay pool automatically.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { registerGossipPubkey(pubkey); }, [pubkey]);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(pubkey);
   const rawName = meta?.display_name || meta?.name || '';
