@@ -1,11 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, GripVertical, X, Wifi, Search, Check } from 'lucide-react';
-import { useFollowing } from '@/hooks/useFollowing';
-import { useNostr } from '@nostrify/react';
-import { useQuery } from '@tanstack/react-query';
+import { Plus, GripVertical, X, Wifi, Search, Check, Building2, Users } from 'lucide-react';
+import { useFollowingProfiles, type FollowingProfile } from '@/hooks/useFollowingProfiles';
+import { useRecentProfiles } from '@/hooks/useRecentProfiles';
+import { profileLabel } from '@/lib/mentions';
 import { nip19 } from 'nostr-tools';
-import type { NostrMetadata } from '@nostrify/nostrify';
 import { useDiscoverDvms } from '@/hooks/useDiscoverDvms';
+import { useDiscoverCommunities } from '@/hooks/useDiscoverCommunities';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -80,6 +82,7 @@ interface EditListDialogProps {
 
 const SOURCE_TYPES: { value: SourceType; label: string; description: string }[] = [
   { value: 'hashtag', label: 'Hashtag', description: 'Posts tagged with a specific #tag' },
+  { value: 'keyword', label: 'Keyword search', description: 'Posts that contain the given keywords' },
   { value: 'people', label: 'Specific People', description: 'Posts from specific npubs' },
   { value: 'follow-list', label: "Someone's Follows", description: "Use another user's NIP-02 follow list" },
   { value: 'dvm', label: 'DVM Feed', description: 'AI-curated feed from a Data Vending Machine' },
@@ -90,6 +93,11 @@ const SOURCE_TYPES: { value: SourceType; label: string; description: string }[] 
   { value: 'rss', label: 'RSS / Atom Feed', description: 'External blog or news feed' },
   { value: 'fediverse', label: 'Fediverse Actor', description: 'ActivityPub user feed (via proxy)' },
 ];
+
+/** Only URL/address-based sources benefit from a friendly display-label override. */
+function showsDisplayLabel(type: SourceType): boolean {
+  return type === 'rss' || type === 'fediverse' || type === 'relay' || type === 'community';
+}
 
 /** Format seconds into m:ss or h:mm:ss */
 function formatDuration(sec: number): string {
@@ -115,11 +123,40 @@ function toHexPubkey(value: string): string | undefined {
   return undefined;
 }
 
-/** Autocomplete people picker backed by the user's follow list */
+/** Parse a community address from raw "34550:pubkey:d" or naddr1 input. */
+function parseCommunityInput(value: string):
+  | { address: string; pubkey: string; identifier: string }
+  | undefined {
+  const v = value.trim();
+  if (!v) return undefined;
+
+  try {
+    const decoded = nip19.decode(v);
+    if (decoded.type === 'naddr') {
+      const data = decoded.data as { kind: number; pubkey: string; identifier: string };
+      if (data.kind !== 34550) return undefined;
+      return {
+        address: `34550:${data.pubkey}:${data.identifier}`,
+        pubkey: data.pubkey,
+        identifier: data.identifier,
+      };
+    }
+  } catch {
+    // fall through to raw format
+  }
+
+  const parts = v.split(':');
+  if (parts.length !== 3) return undefined;
+  const [kind, pubkey, identifier] = parts;
+  if (kind !== '34550' || !/^[0-9a-f]{64}$/i.test(pubkey) || !identifier) return undefined;
+  return { address: v, pubkey, identifier };
+}
+
+/** Autocomplete people picker backed by follows + recently encountered profiles. */
 function PeopleField({
   pubkeys,
   onChange,
-  label = 'People (from your follows)',
+  label = 'People',
   placeholder = 'Search by name or paste npub…',
 }: {
   pubkeys: string[];
@@ -127,47 +164,59 @@ function PeopleField({
   label?: string;
   placeholder?: string;
 }) {
-  const { nostr } = useNostr();
-  const { data: followingHex = [] } = useFollowing();
-
-  // Fetch metadata for all follows so we can show names
-  const { data: metaMap = {} } = useQuery<Record<string, NostrMetadata>>({
-    queryKey: ['nostr', 'follow-meta-batch', followingHex.slice(0, 150).join(',')],
-    queryFn: async ({ signal }) => {
-      if (!followingHex.length) return {};
-      const events = await nostr.query(
-        [{ kinds: [0], authors: followingHex.slice(0, 150), limit: 150 }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
-      );
-      const map: Record<string, NostrMetadata> = {};
-      for (const ev of events) {
-        try {
-          map[ev.pubkey] = JSON.parse(ev.content) as NostrMetadata;
-        } catch {}
-      }
-      return map;
-    },
-    enabled: followingHex.length > 0,
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: followingProfiles = [], isLoading: followingLoading } = useFollowingProfiles();
+  const { data: recentProfiles = [], isLoading: recentLoading } = useRecentProfiles();
 
   const [search, setSearch] = useState('');
   const [manualInput, setManualInput] = useState('');
 
-  const suggestions = useMemo(() => {
-    const q = search.toLowerCase();
-    return followingHex
-      .map((pk) => {
-        const meta = metaMap[pk];
-        const name = meta?.display_name || meta?.name || '';
-        return { pk, name };
+  const followPks = useMemo(
+    () => new Set(followingProfiles.map((p) => p.pubkey)),
+    [followingProfiles],
+  );
+
+  // Merge follows and recent encounters, keeping follows first and removing duplicates.
+  const allProfiles = useMemo<FollowingProfile[]>(() => {
+    const seen = new Set<string>();
+    const out: FollowingProfile[] = [];
+    for (const p of followingProfiles) {
+      if (!seen.has(p.pubkey)) {
+        seen.add(p.pubkey);
+        out.push(p);
+      }
+    }
+    for (const p of recentProfiles) {
+      if (!seen.has(p.pubkey)) {
+        seen.add(p.pubkey);
+        out.push(p);
+      }
+    }
+    return out;
+  }, [followingProfiles, recentProfiles]);
+
+  const q = search.trim().toLowerCase();
+
+  const followingMatches = useMemo(() => {
+    if (!q) return [];
+    return followingProfiles
+      .filter((p) => {
+        const label = profileLabel(p).toLowerCase();
+        return label.includes(q) || p.pubkey.toLowerCase().startsWith(q);
       })
-      .filter(({ pk, name }) => {
-        if (!q) return true;
-        return name.toLowerCase().includes(q) || pk.includes(q);
+      .slice(0, 10);
+  }, [followingProfiles, q]);
+
+  const recentMatches = useMemo(() => {
+    if (!q) return [];
+    return recentProfiles
+      .filter((p) => {
+        const label = profileLabel(p).toLowerCase();
+        return label.includes(q) || p.pubkey.toLowerCase().startsWith(q);
       })
-      .slice(0, 20);
-  }, [followingHex, metaMap, search]);
+      .slice(0, 10);
+  }, [recentProfiles, q]);
+
+  const hasSuggestions = followingMatches.length > 0 || recentMatches.length > 0;
 
   const toggle = (pk: string) => {
     if (pubkeys.includes(pk)) {
@@ -193,8 +242,8 @@ function PeopleField({
       {pubkeys.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {pubkeys.map((pk) => {
-            const meta = metaMap[pk];
-            const name = meta?.display_name || meta?.name || pk.slice(0, 8) + '…';
+            const profile = allProfiles.find((p) => p.pubkey === pk);
+            const name = profile ? profileLabel(profile) : pk.slice(0, 8) + '…';
             return (
               <Badge key={pk} variant="secondary" className="text-xs gap-1 pr-1">
                 {name}
@@ -210,38 +259,59 @@ function PeopleField({
         </div>
       )}
 
-      {/* Search follows */}
-      {followingHex.length > 0 && (
-        <div className="relative">
-          <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search your follows…"
-            className="h-7 text-xs bg-background pl-6"
-          />
-        </div>
-      )}
+      {/* Search profiles */}
+      <div className="relative">
+        <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={followingProfiles.length > 0 ? 'Search follows & recent…' : 'Search recent people…'}
+          className="h-7 text-xs bg-background pl-6"
+        />
+      </div>
 
       {/* Suggestion list */}
-      {search !== '' && suggestions.length > 0 && (
-        <div className="max-h-32 overflow-y-auto border border-border rounded-md bg-background text-xs divide-y divide-border">
-          {suggestions.map(({ pk, name }) => {
-            const selected = pubkeys.includes(pk);
-            return (
-              <button
-                key={pk}
-                className={cn(
-                  'flex items-center justify-between w-full px-2 py-1.5 hover:bg-accent transition-colors text-left',
-                  selected && 'text-primary',
-                )}
-                onClick={() => toggle(pk)}
-              >
-                <span className="truncate">{name || pk.slice(0, 12) + '…'}</span>
-                {selected && <Check size={11} className="flex-shrink-0" />}
-              </button>
-            );
-          })}
+      {q !== '' && (
+        <div className="max-h-40 overflow-y-auto border border-border rounded-md bg-background text-xs">
+          {(followingLoading || recentLoading) && !hasSuggestions && (
+            <div className="px-2 py-1.5 text-muted-foreground">Loading profiles…</div>
+          )}
+
+          {followingMatches.length > 0 && (
+            <div className="divide-y divide-border">
+              <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground bg-muted/50">
+                Following
+              </p>
+              {followingMatches.map((profile) => (
+                <ProfileSuggestionRow
+                  key={profile.pubkey}
+                  profile={profile}
+                  selected={pubkeys.includes(profile.pubkey)}
+                  onToggle={() => toggle(profile.pubkey)}
+                />
+              ))}
+            </div>
+          )}
+
+          {recentMatches.length > 0 && (
+            <div className="divide-y divide-border">
+              <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground bg-muted/50">
+                Recently encountered
+              </p>
+              {recentMatches.map((profile) => (
+                <ProfileSuggestionRow
+                  key={profile.pubkey}
+                  profile={profile}
+                  selected={pubkeys.includes(profile.pubkey)}
+                  onToggle={() => toggle(profile.pubkey)}
+                />
+              ))}
+            </div>
+          )}
+
+          {!followingLoading && !recentLoading && !hasSuggestions && (
+            <div className="px-2 py-1.5 text-muted-foreground">No matches found.</div>
+          )}
         </div>
       )}
 
@@ -259,6 +329,38 @@ function PeopleField({
         </Button>
       </div>
     </div>
+  );
+}
+
+function ProfileSuggestionRow({
+  profile,
+  selected,
+  onToggle,
+}: {
+  profile: FollowingProfile;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const name = profileLabel(profile);
+  return (
+    <button
+      className={cn(
+        'flex items-center justify-between w-full px-2 py-1.5 hover:bg-accent transition-colors text-left',
+        selected && 'text-primary',
+      )}
+      onClick={onToggle}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        <Avatar className="w-5 h-5 flex-shrink-0">
+          <AvatarImage src={profile.picture} />
+          <AvatarFallback className="bg-primary/20 text-primary text-[8px] font-bold">
+            {name[0]?.toUpperCase() ?? '?'}
+          </AvatarFallback>
+        </Avatar>
+        <span className="truncate">{name}</span>
+      </div>
+      {selected && <Check size={11} className="flex-shrink-0" />}
+    </button>
   );
 }
 
@@ -340,6 +442,209 @@ function DvmField({
   );
 }
 
+/** Community source picker — discover existing communities or create a new one. */
+function CommunityField({
+  source,
+  onChange,
+}: {
+  source: ListSource;
+  onChange: (s: ListSource) => void;
+}) {
+  const { data: communities = [], isLoading } = useDiscoverCommunities();
+  const { user } = useCurrentUser();
+  const { mutateAsync: publish, isPending: isCreating } = useNostrPublish();
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [description, setDescription] = useState('');
+  const [image, setImage] = useState('');
+
+  const selected = parseCommunityInput(source.communityId ?? '');
+
+  const selectCommunity = (address: string, communityName: string) => {
+    onChange({ ...source, communityId: address, label: communityName });
+  };
+
+  const createCommunity = async () => {
+    if (!user?.pubkey || !name.trim() || !identifier.trim()) return;
+    const slug = identifier.trim().toLowerCase().replace(/\s+/g, '-');
+    await publish({
+      kind: 34550,
+      content: '',
+      tags: [
+        ['d', slug],
+        ['name', name.trim()],
+        ['description', description.trim()],
+        ...(image.trim() ? [['image', image.trim()]] : []),
+        ['p', user.pubkey, '', 'moderator'],
+      ],
+    });
+    const address = `34550:${user.pubkey}:${slug}`;
+    onChange({ ...source, communityId: address, label: name.trim() });
+    setShowCreate(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs text-muted-foreground">Community</Label>
+
+      {/* Discovered communities */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
+          {isLoading ? (
+            <><Loader2 size={10} className="animate-spin" /> Discovering communities…</>
+          ) : (
+            `${communities.length} community${communities.length !== 1 ? 'ies' : 'y'} found`
+          )}
+        </p>
+
+        {!isLoading && communities.length === 0 && (
+          <p className="text-xs text-muted-foreground italic">
+            No communities discovered yet. You can create one below or paste a community address manually.
+          </p>
+        )}
+
+        <div className="max-h-40 overflow-y-auto space-y-1.5 pr-0.5">
+          {communities.map((community) => {
+            const isSelected = selected?.address === community.address;
+            return (
+              <button
+                key={community.address}
+                onClick={() => selectCommunity(community.address, community.name)}
+                className={cn(
+                  'w-full flex items-center gap-2.5 text-left px-2.5 py-2 rounded-lg border text-xs transition-colors',
+                  isSelected
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-background hover:bg-accent',
+                )}
+              >
+                <Avatar className="w-8 h-8 flex-shrink-0 rounded-lg">
+                  <AvatarImage src={community.image} />
+                  <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-bold rounded-lg">
+                    {community.name[0]?.toUpperCase() ?? <Building2 size={14} />}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold truncate">{community.name}</p>
+                  {community.description && (
+                    <p className="text-muted-foreground text-[11px] truncate">{community.description}</p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground/70 flex items-center gap-1 mt-0.5">
+                    <Users size={10} />
+                    {community.moderators.length} moderator{community.moderators.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                {isSelected && <Check size={13} className="flex-shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Manual address entry */}
+      <div className="space-y-1">
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Or enter address / naddr</p>
+        <Input
+          value={source.communityId ?? ''}
+          onChange={(e) => onChange({ ...source, communityId: e.target.value.trim(), label: undefined })}
+          placeholder="34550:<pubkey>:<d-tag> or naddr1..."
+          className="h-7 text-xs bg-background"
+        />
+      </div>
+
+      {/* Create community */}
+      {user ? (
+        <div className="pt-1">
+          {!showCreate ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowCreate(true)}
+              className="h-7 text-xs w-full"
+            >
+              <Plus size={13} className="mr-1.5" />
+              Create a community
+            </Button>
+          ) : (
+            <div className="border border-border rounded-lg p-3 space-y-2 bg-background">
+              <p className="text-xs font-medium text-foreground">Create new community</p>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Name</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => {
+                    const newName = e.target.value;
+                    setName(newName);
+                    if (!identifier || identifier === name.toLowerCase().replace(/\s+/g, '-')) {
+                      setIdentifier(newName.toLowerCase().replace(/\s+/g, '-'));
+                    }
+                  }}
+                  placeholder="My Community"
+                  className="h-7 text-xs bg-background"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Identifier (URL slug)</Label>
+                <Input
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
+                  placeholder="my-community"
+                  className="h-7 text-xs bg-background"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Description (optional)</Label>
+                <Input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What is this community about?"
+                  className="h-7 text-xs bg-background"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px] text-muted-foreground">Image URL (optional)</Label>
+                <Input
+                  value={image}
+                  onChange={(e) => setImage(e.target.value)}
+                  placeholder="https://…"
+                  className="h-7 text-xs bg-background"
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowCreate(false)}
+                  className="h-7 text-xs flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void createCommunity()}
+                  disabled={!name.trim() || !identifier.trim() || isCreating}
+                  className="h-7 text-xs flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  {isCreating ? <><Loader2 size={12} className="animate-spin mr-1" /> Creating…</> : 'Create'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">Log in to create a community.</p>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        NIP-72 Reddit-style community. Posts need moderator approval.
+      </p>
+    </div>
+  );
+}
+
 function SourceEditor({
   source,
   onChange,
@@ -366,16 +671,18 @@ function SourceEditor({
         </button>
       </div>
 
-      {/* Label override */}
-      <div className="space-y-1">
-        <Label className="text-xs text-muted-foreground">Display label (optional)</Label>
-        <Input
-          value={source.label ?? ''}
-          onChange={(e) => onChange({ ...source, label: e.target.value || undefined })}
-          placeholder={typeInfo?.label}
-          className="h-7 text-xs bg-background"
-        />
-      </div>
+      {/* Label override — only for sources whose natural value is a link/address */}
+      {showsDisplayLabel(source.type) && (
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Display label (optional)</Label>
+          <Input
+            value={source.label ?? ''}
+            onChange={(e) => onChange({ ...source, label: e.target.value || undefined })}
+            placeholder={typeInfo?.label}
+            className="h-7 text-xs bg-background"
+          />
+        </div>
+      )}
 
       {/* Type-specific fields */}
       {source.type === 'hashtag' && (
@@ -387,6 +694,30 @@ function SourceEditor({
             placeholder="bitcoin"
             className="h-7 text-xs bg-background"
           />
+        </div>
+      )}
+
+      {source.type === 'keyword' && (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Keywords</Label>
+            <Input
+              value={source.keywords?.join(' ') ?? ''}
+              onChange={(e) => {
+                const keywords = e.target.value
+                  .toLowerCase()
+                  .split(/\s+/)
+                  .map((k) => k.replace(/[^a-z0-9\-]/g, ''))
+                  .filter(Boolean);
+                onChange({ ...source, keywords });
+              }}
+              placeholder="bitcoin lightning nostr"
+              className="h-7 text-xs bg-background"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Separate keywords with spaces. Posts must contain all keywords.
+          </p>
         </div>
       )}
 
@@ -418,22 +749,7 @@ function SourceEditor({
         />
       )}
 
-      {source.type === 'community' && (
-        <div className="space-y-2">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Community address</Label>
-            <Input
-              value={source.communityId ?? ''}
-              onChange={(e) => onChange({ ...source, communityId: e.target.value.trim() })}
-              placeholder="34550:<pubkey>:<d-tag> or naddr1..."
-              className="h-7 text-xs bg-background"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            NIP-72 Reddit-style community. Posts need moderator approval.
-          </p>
-        </div>
-      )}
+      {source.type === 'community' && <CommunityField source={source} onChange={onChange} />}
 
       {source.type === 'group' && (
         <div className="space-y-2">

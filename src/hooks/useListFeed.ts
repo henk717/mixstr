@@ -7,8 +7,69 @@ import { useCurrentUser } from './useCurrentUser';
 import type { SidebarList, ListSource } from '@/lib/sidebarLists';
 import { nip19 } from 'nostr-tools';
 import { useNostrPublish } from './useNostrPublish';
+import { isRepost } from '@/lib/postUtils';
 
 const PAGE_SIZE = 30;
+
+function normalizeTokens(input: string): string[] {
+  return input
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+}
+
+/** Score a note against a set of keyword tokens. Higher is better. */
+function scoreKeywordPost(event: NostrEvent, tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  const content = event.content.toLowerCase();
+  let score = 0;
+
+  // Exact phrase formed by all tokens.
+  const phrase = tokens.join(' ');
+  if (content.includes(phrase)) score += 60;
+
+  // All tokens present together.
+  if (tokens.every((token) => content.includes(token))) score += 40;
+
+  // Per-token hits.
+  for (const token of tokens) {
+    if (content.includes(token)) score += 10;
+  }
+
+  // Hashtag matches are strong signals.
+  for (const tag of event.tags) {
+    if (tag[0] !== 't') continue;
+    const tagValue = (tag[1] ?? '').toLowerCase();
+    for (const token of tokens) {
+      if (tagValue === token) score += 20;
+      else if (tagValue.includes(token)) score += 8;
+    }
+  }
+
+  // Small recency boost.
+  const ageDays = (Date.now() / 1000 - event.created_at) / 86400;
+  if (ageDays < 1) score += 12;
+  else if (ageDays < 7) score += 8;
+  else if (ageDays < 30) score += 4;
+
+  return score;
+}
+
+function rankKeywordPosts(events: NostrEvent[], tokens: string[]): NostrEvent[] {
+  return events
+    .filter((event) => event.content.trim().length > 0 && !isRepost(event))
+    .filter((event) => {
+      const content = event.content.toLowerCase();
+      return tokens.every((token) => content.includes(token));
+    })
+    .map((event) => ({ event, score: scoreKeywordPost(event, tokens) }))
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.event.created_at - a.event.created_at;
+    })
+    .map(({ event }) => event);
+}
 
 /** Decode npub/hex to hex pubkey */
 function toPubkeyHex(value: string): string {
@@ -183,6 +244,17 @@ async function fetchSource(
         [{ kinds: [1, 30023], '#t': [source.tag], limit, ...timeFilter }],
         { signal: abort },
       );
+    }
+
+    case 'keyword': {
+      const keywords = source.keywords ?? [];
+      if (keywords.length === 0) return [];
+      const search = keywords.join(' ');
+      const events = await nostr.query(
+        [{ kinds: [1, 30023], search, limit: limit * 2, ...timeFilter }],
+        { signal: abort },
+      );
+      return rankKeywordPosts(events, keywords).slice(0, limit);
     }
 
     case 'people': {
