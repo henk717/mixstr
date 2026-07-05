@@ -91,7 +91,7 @@ export function LongPostCard({ event }: LongPostCardProps) {
       )}
       {reply && !parentEvent && parentRef && (
         <div className="pt-2 pb-0">
-          <ReplyingToChip parentId={parentRef.id} parentAuthor={parentRef.author} isPending={parentPending} />
+          <ReplyingToChip parentId={parentRef.id} isPending={parentPending} />
         </div>
       )}
 

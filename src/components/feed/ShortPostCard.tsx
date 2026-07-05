@@ -21,6 +21,7 @@ import {
   getParentEventId,
 } from '@/lib/postUtils';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useParentEvent } from '@/hooks/useParentEvent';
 
 interface ShortPostCardProps {
   event: NostrEvent;
@@ -56,10 +57,10 @@ export function ShortPostCard({ event }: ShortPostCardProps) {
   const summary = getSummary(displayEvent);
   const nevent = eventToNevent(displayEvent);
 
-  // For replies: get the parent reference for the compact chip.
+  // For replies: fetch the parent event so the compact chip can replace the
+  // placeholder text once it resolves.
   const parentRef = reply ? getParentEventId(event) : null;
-  const parentId = parentRef?.id ?? '';
-  const parentAuthor = parentRef?.author;
+  const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
 
   const hasMedia = images.length > 0 || videos.length > 0 || embeds.length > 0;
 
@@ -84,8 +85,12 @@ export function ShortPostCard({ event }: ShortPostCardProps) {
       )}
 
       {/* ── Compact "Replying to" chip (short view keeps it minimal) ── */}
-      {reply && parentId && (
-        <ReplyingToChip parentId={parentId} parentAuthor={parentAuthor} />
+      {reply && parentRef && (
+        <ReplyingToChip
+          parentId={parentRef.id}
+          parent={parentEvent}
+          isPending={parentPending}
+        />
       )}
 
       {/* ── Main post ── */}

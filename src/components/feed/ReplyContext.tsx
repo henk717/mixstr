@@ -4,7 +4,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
-import { relativeTime } from '@/lib/postUtils';
+import { relativeTime, stripMediaUrls } from '@/lib/postUtils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 /**
@@ -83,32 +83,48 @@ export function ReplyParentPreview({
 }
 
 /**
- * Compact "Replying to @name" chip, shown while the parent event is still
- * loading or if it couldn't be fetched from any relay.
+ * Compact "Replying to @name" chip.
+ *
+ * Renders immediately with a placeholder. Once the resolved parent event is
+ * supplied, the text is replaced with the actual author name (and links to the
+ * parent event with an author hint so it resolves faster).
  */
 export function ReplyingToChip({
   parentId,
-  parentAuthor,
+  parent,
   isPending,
 }: {
   parentId: string;
-  parentAuthor?: string;
+  parent?: NostrEvent | null;
   isPending?: boolean;
 }) {
-  // Try to resolve the author's display name from the pubkey hint in the e-tag.
-  // This often resolves even before the parent event is found, giving us a name.
-  const author = useAuthor(parentAuthor ?? '');
+  // Prefer the resolved parent's author; fall back to the tag hint if available.
+  const author = useAuthor(parent?.pubkey ?? '');
   const meta = author.data?.metadata;
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim();
 
   const neventLink = (() => {
     try {
-      return nip19.neventEncode({ id: parentId, ...(parentAuthor ? { author: parentAuthor } : {}) });
+      return nip19.neventEncode({ id: parentId, ...(parent?.pubkey ? { author: parent.pubkey } : {}) });
     } catch {
       return parentId;
     }
   })();
+
+  const text = (() => {
+    if (displayName) return `@${displayName}`;
+    if (isPending || author.isPending) return '…';
+    return 'a post';
+  })();
+
+  // Compact snippet of the parent post, stripped of media/URLs/embeds.
+  const snippet = parent
+    ? stripMediaUrls(parent.content)
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    : '';
 
   return (
     <div className="flex items-center gap-1 px-4 pt-2 pb-0 pl-[54px]">
@@ -117,15 +133,12 @@ export function ReplyingToChip({
       <Link
         to={`/${neventLink}`}
         onClick={(e) => e.stopPropagation()}
-        className="text-xs text-primary hover:underline truncate max-w-[180px]"
+        className="text-xs text-primary hover:underline truncate max-w-[260px]"
       >
-        {displayName
-          ? `@${displayName}`
-          : parentAuthor
-            ? `@${parentAuthor.slice(0, 8)}…`
-            : isPending
-              ? '…'
-              : 'a post'}
+        {text}
+        {parent && snippet && (
+          <span className="text-muted-foreground"> · {snippet}</span>
+        )}
       </Link>
     </div>
   );
