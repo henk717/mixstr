@@ -42,6 +42,11 @@ export function NostrSync() {
   // so we don't re-run it on every render while awaiting the result.
   const bootstrapTriggeredRef = useRef<string | null>(null);
 
+  // Track whether we've already synced the user's own NIP-65 relays this
+  // session. We overwrite local settings with the profile the first time it
+  // resolves so this app stays in sync with other Nostr clients.
+  const nip65SyncedForUserRef = useRef<string | null>(null);
+
   // ── Step 1: import relays from NIP-07 extension immediately on login ──
   useEffect(() => {
     const login = logins[0];
@@ -116,18 +121,24 @@ export function NostrSync() {
         if (events.length > 0) {
           const event = events[0];
 
-          // Only update if the event is newer than our stored data
-          if (event.created_at > config.relayMetadata.updatedAt) {
-            const fetchedRelays = event.tags
-              .filter(([name]) => name === 'r')
-              .map(([, url, marker]) => ({
-                url,
-                read: !marker || marker === 'read',
-                write: !marker || marker === 'write',
-              }));
+          const fetchedRelays = event.tags
+            .filter(([name]) => name === 'r')
+            .map(([, url, marker]) => ({
+              url,
+              read: !marker || marker === 'read',
+              write: !marker || marker === 'write',
+            }));
 
-            if (fetchedRelays.length > 0) {
+          if (fetchedRelays.length > 0) {
+            const isNewer = event.created_at > config.relayMetadata.updatedAt;
+            const isFirstSyncThisSession = nip65SyncedForUserRef.current !== user.pubkey;
+
+            // Always overwrite local settings the first time we resolve the
+            // user's own NIP-65 this session; after that, only update when the
+            // published relay list is newer than what we already have.
+            if (isNewer || isFirstSyncThisSession) {
               console.log('[NostrSync] Synced NIP-65 relay list from Nostr:', fetchedRelays);
+              nip65SyncedForUserRef.current = user.pubkey;
               updateConfig((current) => ({
                 ...current,
                 relayMetadata: {

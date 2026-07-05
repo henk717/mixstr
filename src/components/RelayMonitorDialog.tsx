@@ -102,7 +102,7 @@ export function RelayMonitorDialog({ open, onClose }: RelayMonitorDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-2xl w-full bg-card border-border p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-2xl w-full max-h-[90vh] flex flex-col bg-card border-border p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-5 pt-5 pb-3 border-b border-border">
           <DialogTitle className="flex items-center gap-3 text-base">
             <Wifi size={18} className="text-primary" />
@@ -141,8 +141,8 @@ export function RelayMonitorDialog({ open, onClose }: RelayMonitorDialogProps) {
           </TabsList>
 
           {/* ── Relays Tab ── */}
-          <TabsContent value="relays" className="flex-1 min-h-0 m-0 data-[state=active]:flex data-[state=active]:flex-col">
-            <ScrollArea className="flex-1 h-[420px]">
+          <TabsContent value="relays" className="flex-1 min-h-0 m-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+            <ScrollArea className="flex-1 h-full">
               <div className="px-3 py-2 space-y-1">
                 {relays.length === 0 ? (
                   <div className="py-12 text-center text-muted-foreground text-sm">
@@ -214,7 +214,7 @@ export function RelayMonitorDialog({ open, onClose }: RelayMonitorDialogProps) {
           </TabsContent>
 
           {/* ── Event Log Tab ── */}
-          <TabsContent value="log" className="flex-1 min-h-0 m-0 data-[state=active]:flex data-[state=active]:flex-col">
+          <TabsContent value="log" className="flex-1 min-h-0 m-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
             <div className="flex items-center justify-between px-4 py-2 border-b border-border/50">
               <span className="text-[10px] text-muted-foreground">
                 Showing latest {visibleLog.length} entries (max {200})
@@ -233,7 +233,7 @@ export function RelayMonitorDialog({ open, onClose }: RelayMonitorDialogProps) {
               </Button>
             </div>
 
-            <ScrollArea className="flex-1 h-[390px]">
+            <ScrollArea className="flex-1 h-full">
               <div ref={logRef} className="px-3 py-2 space-y-0.5 font-mono text-[11px]">
                 {visibleLog.length === 0 ? (
                   <div className="py-12 text-center text-muted-foreground text-sm font-sans">

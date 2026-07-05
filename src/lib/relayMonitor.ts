@@ -40,6 +40,9 @@ export interface EventLogEntry {
 /** Current relay map: url → entry */
 const relayMap = new Map<string, RelayEntry>();
 
+/** URLs that have failed to connect this session — excluded from future routes */
+const failedRelays = new Set<string>();
+
 /** Bounded event log (newest first) */
 const MAX_LOG = 200;
 const eventLog: EventLogEntry[] = [];
@@ -102,6 +105,32 @@ export function getConnectedCount(): number {
 /** Total relay count (all states) */
 export function getTotalCount(): number {
   return totalCountSnapshot;
+}
+
+/** Mark a relay as failed for this session so it can be replaced in routes */
+export function markRelayFailed(url: string): void {
+  if (!failedRelays.has(url)) {
+    failedRelays.add(url);
+    notify();
+  }
+}
+
+/** Remove a relay from the failed set (e.g. it connected successfully) */
+export function unmarkRelayFailed(url: string): void {
+  if (failedRelays.has(url)) {
+    failedRelays.delete(url);
+    notify();
+  }
+}
+
+/** Check whether a relay has been marked failed this session */
+export function isRelayFailed(url: string): boolean {
+  return failedRelays.has(url);
+}
+
+/** Snapshot of all failed relay URLs */
+export function getFailedRelays(): readonly string[] {
+  return [...failedRelays];
 }
 
 // ── Internal notify ───────────────────────────────────────────────────────

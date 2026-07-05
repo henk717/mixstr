@@ -4,11 +4,14 @@ import { NostrContext } from '@nostrify/react';
 import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
-import { useRelayGossip, getGossipRelays } from '@/hooks/useRelayGossip';
+import { useRelayGossip, getGossipCandidates, GOSSIP_RELAY_LIMIT } from '@/hooks/useRelayGossip';
 import {
   updateRelayStatus,
   addEventLog,
   incrementRelayEvents,
+  markRelayFailed,
+  unmarkRelayFailed,
+  isRelayFailed,
   type RelayEntry,
 } from '@/lib/relayMonitor';
 
@@ -21,10 +24,10 @@ interface NostrProviderProps {
  * useNostr() without violating the "must be within a NostrProvider" rule.
  * It drives the gossip relay scanning and updates the pool's gossipRelaysRef.
  */
-function RelayGossipSync({ gossipRelaysRef }: { gossipRelaysRef: React.RefObject<string[]> }) {
-  useRelayGossip((relays) => {
-    gossipRelaysRef.current = relays;
-    console.log(`[RelayGossip] Updated gossip relays (${relays.length}):`, relays.slice(0, 5).join(', ') + (relays.length > 5 ? '…' : ''));
+function RelayGossipSync({ gossipCandidatesRef }: { gossipCandidatesRef: React.RefObject<string[]> }) {
+  useRelayGossip((candidates) => {
+    gossipCandidatesRef.current = candidates;
+    console.log(`[RelayGossip] Updated gossip candidates (${candidates.length}):`, candidates.slice(0, 5).join(', ') + (candidates.length > 5 ? '…' : ''));
   });
   return null;
 }
@@ -54,39 +57,144 @@ function createInstrumentedRelay(
     },
   });
 
-  // Patch the underlying WebSocket lifecycle.
-  patchRelaySocket(relay, url, type);
+  // Patch the relay so the monitor stays in sync with its actual socket state.
+  instrumentRelay(relay, url, type);
 
   return relay;
 }
 
+/** Relays currently being monitored for health/status changes. */
+const monitoredRelays = new Map<string, NRelay1>();
+const relayTypes = new Map<string, RelayEntry['type']>();
+
+/** Relays that have successfully connected at least once this session. */
+const connectedThisSession = new Set<string>();
+
+/** Tracks sockets we've already patched so we don't leak duplicate listeners. */
+const patchedSockets = new WeakSet<object>();
+
+let relaySyncInterval: ReturnType<typeof setInterval> | undefined;
+
+type WsSocket = {
+  readyState: number;
+  addEventListener(type: string, listener: (this: unknown, ev: unknown) => void): void;
+};
+
+function getSocket(relay: NRelay1): WsSocket {
+  return relay.socket as unknown as WsSocket;
+}
+
 /**
- * Monkey-patches a relay instance to intercept WebSocket events.
+ * Attaches lifecycle listeners to a relay's underlying WebSocket wrapper and
+ * keeps a weak reference so re-connections are reported correctly.
+ */
+function instrumentRelay(relay: NRelay1, url: string, type: RelayEntry['type']) {
+  monitoredRelays.set(url, relay);
+  relayTypes.set(url, type);
+  patchRelaySocket(relay, url, type);
+  patchRelayReq(relay, url);
+  startRelayStatusSync();
+}
+
+/**
+ * Monkey-patches the relay's underlying WebSocket wrapper to report lifecycle
+ * to the relay monitor singleton. The `Websocket` wrapper persists across
+ * reconnects, so listeners attached here stay attached.
  */
 function patchRelaySocket(relay: NRelay1, url: string, type: RelayEntry['type']) {
+  const socket = getSocket(relay);
+  if (patchedSockets.has(socket)) return;
+  patchedSockets.add(socket);
+
+  const setConnected = () => {
+    connectedThisSession.add(url);
+    unmarkRelayFailed(url);
+    updateRelayStatus(url, 'connected', type);
+    addEventLog('ok', url, 'Connected');
+  };
+
+  const setDisconnected = () => {
+    // A relay that never managed to connect is treated as failed for this
+    // session so the router can replace it with the next gossip candidate.
+    if (!connectedThisSession.has(url)) {
+      markRelayFailed(url);
+    }
+    updateRelayStatus(url, 'disconnected', type);
+    addEventLog('error', url, 'Disconnected');
+  };
+
+  const setError = () => {
+    if (!connectedThisSession.has(url)) {
+      markRelayFailed(url);
+    }
+    updateRelayStatus(url, 'error', type);
+    addEventLog('error', url, 'Connection error');
+  };
+
   try {
-    relay.addEventListener('open', () => {
-      updateRelayStatus(url, 'connected', type);
-      addEventLog('ok', url, 'Connected');
-    });
+    socket.addEventListener('open', setConnected);
+    socket.addEventListener('reconnect', setConnected);
+    socket.addEventListener('close', setDisconnected);
+    socket.addEventListener('error', setError);
 
-    relay.addEventListener('close', () => {
-      updateRelayStatus(url, 'disconnected', type);
-      addEventLog('error', url, 'Disconnected');
-    });
-
-    relay.addEventListener('notice', (e: Event) => {
-      const detail = (e as CustomEvent).detail as string | undefined;
-      addEventLog('notice', url, 'NOTICE', detail?.slice(0, 120));
-    });
-
-    // Count inbound events
-    relay.addEventListener('event', () => {
-      incrementRelayEvents(url);
-    });
+    // If the socket is already open when we arrive, mark it immediately.
+    if (socket.readyState === WebSocket.OPEN) {
+      setConnected();
+    }
   } catch {
-    console.warn('[RelayMonitor] Could not patch relay:', url);
+    console.warn('[RelayMonitor] Could not patch relay socket:', url);
   }
+}
+
+/**
+ * Starts a single background interval that polls the readyState of every
+ * monitored relay. This catches reconnects after idle timeouts / spotty
+ * networks and prevents the indicator from getting stuck on stale states.
+ */
+function startRelayStatusSync() {
+  if (relaySyncInterval) return;
+
+  relaySyncInterval = setInterval(() => {
+    for (const [url, relay] of monitoredRelays) {
+      const type = relayTypes.get(url);
+      if (!type) continue;
+
+      // NRelay1 can replace its socket wrapper after an idle timeout; make
+      // sure any new wrapper also gets patched, then reflect its readyState.
+      patchRelaySocket(relay, url, type);
+
+      try {
+        const socket = getSocket(relay);
+        if (socket.readyState === WebSocket.OPEN) {
+          updateRelayStatus(url, 'connected', type);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, 1500);
+}
+
+/**
+ * Counts every EVENT message this relay yields. This is more reliable than
+ * trying to parse raw WebSocket frames, and it survives socket reconnects.
+ */
+function patchRelayReq(relay: NRelay1, url: string) {
+  const originalReq = relay.req.bind(relay);
+
+  const wrappedReq = async function* (
+    filters: NostrFilter[],
+    opts?: { signal?: AbortSignal },
+  ) {
+    for await (const msg of originalReq(filters, opts)) {
+      if (Array.isArray(msg) && msg[0] === 'EVENT') {
+        incrementRelayEvents(url);
+      }
+      yield msg;
+    }
+  };
+
+  relay.req = wrappedReq as unknown as typeof relay.req;
 }
 
 const NostrProvider: React.FC<NostrProviderProps> = (props) => {
@@ -101,10 +209,11 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   // render) to satisfy React's purity rules.
   const relayMetadataRef = useRef(config.relayMetadata);
 
-  // Gossip relays (top-N from NIP-65 scanning of followed profiles).
+  // Gossip relay candidates sorted by popularity. NostrProvider slices from
+  // this list, skipping candidates that have failed to connect this session.
   // Stored in a ref so the reqRouter closure always reads the latest list
   // without recreating the pool.
-  const gossipRelaysRef = useRef<string[]>(getGossipRelays());
+  const gossipCandidatesRef = useRef<string[]>(getGossipCandidates());
 
   // Stable ref to the current user's signer for NIP-42 AUTH.
   const signerRef = useRef<NostrSigner | undefined>(undefined);
@@ -137,7 +246,9 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
       const routes = new Map<string, NostrFilter[]>();
 
       // Route to all configured read relays (user's own NIP-65 list).
-      const readRelays = relayMetadataRef.current.relays
+      const pinnedRelays = relayMetadataRef.current.relays;
+      const pinnedUrls = new Set(pinnedRelays.map(r => r.url));
+      const readRelays = pinnedRelays
         .filter(r => r.read)
         .map(r => r.url);
 
@@ -145,10 +256,20 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
         routes.set(url, filters);
       }
 
-      // Add gossip relays discovered via NIP-65 of followed profiles.
-      // These are the top-N most common relays across everyone the user follows.
-      // They supplement (never replace) the user's own relays.
-      for (const url of gossipRelaysRef.current) {
+      // Fill the remaining slots with gossip candidates, skipping any that
+      // have failed to connect this session. If a high-ranking candidate
+      // fails, the next one in the list takes its place.
+      const gossipSlots = Math.max(0, GOSSIP_RELAY_LIMIT - pinnedRelays.length);
+      const activeGossip: string[] = [];
+
+      for (const url of gossipCandidatesRef.current) {
+        if (activeGossip.length >= gossipSlots) break;
+        if (pinnedUrls.has(url)) continue;
+        if (isRelayFailed(url)) continue;
+        activeGossip.push(url);
+      }
+
+      for (const url of activeGossip) {
         if (!routes.has(url)) {
           routes.set(url, filters);
         }
@@ -225,7 +346,7 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
     <NostrContext.Provider value={contextValue}>
       {/* RelayGossipSync is a child of NostrContext.Provider so it can safely
           call useNostr() without the "must be within a NostrProvider" error. */}
-      <RelayGossipSync gossipRelaysRef={gossipRelaysRef} />
+      <RelayGossipSync gossipCandidatesRef={gossipCandidatesRef} />
       {children}
     </NostrContext.Provider>
   );

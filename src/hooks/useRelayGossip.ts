@@ -19,22 +19,31 @@ const BATCH_SIZE = 150;
 /** relay URL → score (number of followed profiles that list this relay) */
 const relayScores = new Map<string, number>();
 
-/** Current top-N gossip relay list (read by NostrProvider) */
-let gossipRelays: string[] = [];
+/**
+ * All discovered gossip relay candidates sorted by popularity (excluding the
+ * user's own pinned relays). NostrProvider slices from this list, skipping any
+ * that fail to connect, so we can fall back to lower-ranked candidates and
+ * keep the active relay count up.
+ */
+let gossipCandidates: string[] = [];
 
-/** Returns the current gossip relay list (snapshot at call time) */
-export function getGossipRelays(): string[] {
-  return gossipRelays;
+/** Returns the current gossip relay candidate list (snapshot at call time) */
+export function getGossipCandidates(): string[] {
+  return gossipCandidates;
 }
 
-/** Recompute and trim gossip relay list from scores, excluding user's own pinned relays */
-function rebuildGossipRelays(excludeUrls: Set<string>, limit: number) {
+/** @deprecated Use `getGossipCandidates()` instead. */
+export function getGossipRelays(): string[] {
+  return gossipCandidates;
+}
+
+/** Recompute the full sorted gossip candidate list, excluding the user's own pinned relays */
+function rebuildGossipCandidates(excludeUrls: Set<string>) {
   const sorted = [...relayScores.entries()]
     .filter(([url]) => !excludeUrls.has(url))
     .sort((a, b) => b[1] - a[1])
-    .slice(0, limit)
     .map(([url]) => url);
-  gossipRelays = sorted;
+  gossipCandidates = sorted;
 }
 
 /**
@@ -45,10 +54,11 @@ function rebuildGossipRelays(excludeUrls: Set<string>, limit: number) {
  *  1. Fetches the user's following list (kind 3).
  *  2. Batch-queries kind 10002 (NIP-65) for all followed pubkeys.
  *  3. Scores each relay URL by how many followed profiles declare it.
- *  4. Builds the gossip relay list: top-N relays NOT already in the user's
- *     own relay list, up to (GOSSIP_RELAY_LIMIT − pinnedCount) slots so that
- *     total connections never exceed GOSSIP_RELAY_LIMIT.
- *  5. Calls `onUpdate` whenever the list changes.
+ *  4. Builds a ranked list of candidate gossip relays NOT already in the user's
+ *     own relay list. NostrProvider will fill up to GOSSIP_RELAY_LIMIT slots
+ *     from this list, automatically skipping candidates that fail to connect
+ *     and falling back to lower-ranked ones.
+ *  5. Calls `onUpdate` whenever the candidate list changes.
  */
 export function useRelayGossip(onUpdate: (relays: string[]) => void) {
   const { nostr } = useNostr();
@@ -122,17 +132,15 @@ export function useRelayGossip(onUpdate: (relays: string[]) => void) {
         }
       }
 
-      // Step 3: rebuild gossip list, excluding user's own pinned relays.
-      // Cap at (GOSSIP_RELAY_LIMIT − pinned count) so total ≤ GOSSIP_RELAY_LIMIT.
+      // Step 3: rebuild gossip candidate list, excluding user's own pinned relays.
       const pinnedSet = new Set(pinnedRelays.map(r => r.url));
-      const gossipSlots = Math.max(0, GOSSIP_RELAY_LIMIT - pinnedRelays.length);
-      rebuildGossipRelays(pinnedSet, gossipSlots);
+      rebuildGossipCandidates(pinnedSet);
 
-      const key = gossipRelays.join(',');
+      const key = gossipCandidates.join(',');
       if (key !== previousListRef.current) {
         previousListRef.current = key;
-        console.log(`[RelayGossip] Updated gossip relays (${gossipRelays.length}):`, gossipRelays.slice(0, 5).join(', ') + (gossipRelays.length > 5 ? '…' : ''));
-        onUpdateRef.current([...gossipRelays]);
+        console.log(`[RelayGossip] Updated gossip candidates (${gossipCandidates.length}):`, gossipCandidates.slice(0, 5).join(', ') + (gossipCandidates.length > 5 ? '…' : ''));
+        onUpdateRef.current([...gossipCandidates]);
       }
     } catch (err) {
       console.warn('[RelayGossip] Gossip fetch failed:', err);

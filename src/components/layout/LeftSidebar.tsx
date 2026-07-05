@@ -384,20 +384,13 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg hover:bg-accent transition-colors group"
           title={`${connectedCount} of ${totalCount} relays connected — click to monitor`}
         >
-          <span className="relative flex-shrink-0">
-            <Wifi
-              size={14}
-              className={cn(
-                'transition-colors',
-                connectedCount > 0 ? 'text-green-500' : 'text-muted-foreground/50',
-              )}
-            />
-            {connectedCount > 0 && (
-              <span className="absolute -top-0.5 -right-1 min-w-[14px] h-3.5 flex items-center justify-center bg-primary text-primary-foreground text-[8px] font-bold rounded-full px-0.5 leading-none">
-                {connectedCount}
-              </span>
+          <Wifi
+            size={14}
+            className={cn(
+              'transition-colors flex-shrink-0',
+              connectedCount > 0 ? 'text-green-500' : 'text-muted-foreground/50',
             )}
-          </span>
+          />
           <span className={cn(
             'text-[10px] tabular-nums transition-colors',
             connectedCount > 0 ? 'text-muted-foreground/70 group-hover:text-foreground' : 'text-muted-foreground/40',
