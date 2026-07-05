@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Plus, GripVertical, X, Wifi, Search, Check } from 'lucide-react';
 import { useFollowing } from '@/hooks/useFollowing';
 import { useNostr } from '@nostrify/react';
@@ -476,6 +476,18 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
   const [sources, setSources] = useState<ListSource[]>(initial?.sources ?? []);
   const [newSourceType, setNewSourceType] = useState<SourceType>('hashtag');
   const [viewOptions, setViewOptions] = useState<ListViewOptions>(initial?.viewOptions ?? {});
+
+  // Reset all form state whenever the dialog opens (or opens for a different list).
+  // useState only runs its initializer once at mount, so without this effect
+  // editing a second list would still show the first list's values.
+  useEffect(() => {
+    if (!open) return;
+    setLabel(initial?.label ?? '');
+    setIcon(initial?.icon ?? 'hash');
+    setSources(initial?.sources ?? []);
+    setNewSourceType('hashtag');
+    setViewOptions(initial?.viewOptions ?? {});
+  }, [open, initial?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addSource = () => {
     setSources((prev) => [
