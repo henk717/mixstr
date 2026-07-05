@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { sourceDescription } from '@/lib/sidebarLists';
 import { tryExtractEmbeddedEvent } from '@/lib/postUtils';
+import { buildSpeedIndex } from '@/lib/spam';
 import type { RssItem } from '@/hooks/useRssFeed';
 import type { NostrEvent } from '@nostrify/nostrify';
 
@@ -32,7 +33,7 @@ type MergedEntry =
 
 export function ListFeedPage() {
   const { id } = useParams<{ id: string }>();
-  const { sidebarLists, updateSidebarList, feedViewModes, setFeedViewMode } = useMixstr();
+  const { sidebarLists, updateSidebarList, feedViewModes, setFeedViewMode, spamSettings } = useMixstr();
   const [editOpen, setEditOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { isMuted } = useMuteList();
@@ -187,16 +188,20 @@ export function ListFeedPage() {
   const mergedTimeline = useMemo<MergedEntry[]>(() => {
     if (!hasRssSources || mode !== 'short') return [];
 
+    const speedIndex = spamSettings.speed.enabled
+      ? buildSpeedIndex(allNostrEvents, spamSettings.speed.windowMinutes)
+      : new Map<string, number>();
+
     const entries: MergedEntry[] = [
       ...allNostrEvents
-        .filter((e) => !isMuted(e))
+        .filter((e) => !isMuted(e, speedIndex))
         .map((event) => ({ type: 'nostr' as const, ts: event.created_at, event })),
       ...rssItems.map((item) => ({ type: 'rss' as const, ts: item.pubDate, item })),
     ];
     entries.sort((a, b) => b.ts - a.ts);
     return entries;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasRssSources, mode, allNostrEvents, rssItems]);
+  }, [hasRssSources, mode, allNostrEvents, rssItems, spamSettings.speed.enabled, spamSettings.speed.windowMinutes]);
 
   if (!list) {
     return (

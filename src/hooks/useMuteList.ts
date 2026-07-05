@@ -1,6 +1,6 @@
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { useCurrentUser } from './useCurrentUser';
 import { useFollowing } from './useFollowing';
 import { useMixstr } from './useMixstr';
@@ -211,12 +211,9 @@ export function useMuteList() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Rolling-window post rate tracker for the speed filter.
-  const speedMapRef = useRef<Map<string, number[]>>(new Map());
-
   /** Returns true if the event should be hidden */
   const isMuted = useCallback(
-    (event: NostrEvent): boolean => {
+    (event: NostrEvent, speedIndex?: Map<string, number>): boolean => {
       if (!event?.pubkey) return true;
       if (user?.pubkey === event.pubkey) return false;
 
@@ -255,17 +252,9 @@ export function useMuteList() {
       }
 
       // Inhuman posting speed
-      if (spamSettings.speed.enabled) {
-        const windowSec = spamSettings.speed.windowMinutes * 60;
-        const now = event.created_at;
-        if (windowSec > 0) {
-          const timestamps = speedMapRef.current.get(event.pubkey) ?? [];
-          timestamps.push(now);
-          const cutoff = now - windowSec;
-          const recent = timestamps.filter((t) => t >= cutoff);
-          speedMapRef.current.set(event.pubkey, recent);
-          if (recent.length > spamSettings.speed.maxEvents) return true;
-        }
+      if (spamSettings.speed.enabled && speedIndex) {
+        const recent = speedIndex.get(event.pubkey) ?? 0;
+        if (recent > spamSettings.speed.maxEvents) return true;
       }
 
       // Non-human-readable / JSON / base64 spam

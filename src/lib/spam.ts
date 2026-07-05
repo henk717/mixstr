@@ -137,3 +137,50 @@ export function isNonHumanReadable(content: string, minBase64Length: number): bo
   if (looksLikeBase64(content, minBase64Length)) return true;
   return false;
 }
+
+/**
+ * Builds a deterministic per-author speed index for a batch of events.
+ *
+ * For each pubkey, returns the maximum number of events that fall within any
+ * rolling `windowMinutes` window. This lets callers flag accounts that posted
+ * more than a configured threshold within a short period.
+ *
+ * The calculation is based on event `created_at` timestamps, not on when events
+ * were received by the client. Timestamps in the future are clamped to the
+ * current wall-clock time so that future-dated events do not inflate windows.
+ */
+export function buildSpeedIndex(
+  events: NostrEvent[],
+  windowMinutes: number,
+): Map<string, number> {
+  const windowSec = windowMinutes * 60;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const byPubkey = new Map<string, number[]>();
+
+  for (const event of events) {
+    if (!event?.pubkey || typeof event.created_at !== 'number') continue;
+    const ts = Math.min(event.created_at, nowSec);
+    const list = byPubkey.get(event.pubkey) ?? [];
+    list.push(ts);
+    byPubkey.set(event.pubkey, list);
+  }
+
+  const index = new Map<string, number>();
+  if (windowSec <= 0) return index;
+
+  for (const [pubkey, timestamps] of byPubkey) {
+    timestamps.sort((a, b) => a - b);
+    let left = 0;
+    let maxInWindow = 0;
+    for (let right = 0; right < timestamps.length; right++) {
+      while (timestamps[right] - timestamps[left] > windowSec) {
+        left++;
+      }
+      const count = right - left + 1;
+      if (count > maxInWindow) maxInWindow = count;
+    }
+    index.set(pubkey, maxInWindow);
+  }
+
+  return index;
+}

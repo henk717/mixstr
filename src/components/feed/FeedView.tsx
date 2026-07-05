@@ -10,8 +10,10 @@ import { InfiniteScrollSentinel } from './InfiniteScrollSentinel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { hasMedia, isLivestream, getAudioTrackInfo, getLivestreamInfo, getMediaDuration, tryExtractEmbeddedEvent } from '@/lib/postUtils';
+import { buildSpeedIndex } from '@/lib/spam';
 import type { ListViewOptions } from '@/lib/sidebarLists';
 import { useMuteList } from '@/hooks/useMuteList';
+import { useMixstr } from '@/hooks/useMixstr';
 
 /** Moderation controls passed through the feed to post cards. */
 export interface FeedModeration {
@@ -87,6 +89,7 @@ export function FeedView({
   moderation,
 }: FeedViewProps) {
   const { isMuted } = useMuteList();
+  const { spamSettings } = useMixstr();
 
   // Merge flat events or pages into one deduplicated list
   const allEvents = useMemo(() => {
@@ -104,11 +107,20 @@ export function FeedView({
     });
   }, [pages, flatEvents]);
 
+  // Pre-compute deterministic per-author speed index for the current batch.
+  const speedIndex = useMemo(
+    () =>
+      spamSettings.speed.enabled
+        ? buildSpeedIndex(allEvents, spamSettings.speed.windowMinutes)
+        : new Map<string, number>(),
+    [allEvents, spamSettings.speed.enabled, spamSettings.speed.windowMinutes],
+  );
+
   // Apply mute list filter
   const visibleEvents = useMemo(
-    () => allEvents.filter((e) => !isMuted(e)),
+    () => allEvents.filter((e) => !isMuted(e, speedIndex)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allEvents, isMuted],
+    [allEvents, isMuted, speedIndex],
   );
 
   if (isLoading && allEvents.length === 0) {
