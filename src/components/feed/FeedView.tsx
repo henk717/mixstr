@@ -165,9 +165,13 @@ export function FeedView({
       ))}
 
       {(mode === 'short' || (mode !== 'media' && mode !== 'audio' && mode !== 'longform')) &&
-        regularEvents.map((event) => (
-          <ShortPostCard key={event.id} event={event} />
-        ))
+        regularEvents.map((event) =>
+          isLivestream(event) ? (
+            <LivestreamCard key={event.id} event={event} />
+          ) : (
+            <ShortPostCard key={event.id} event={event} />
+          ),
+        )
       }
 
       {isPaginated && (

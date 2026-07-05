@@ -238,6 +238,28 @@ async function fetchSource(
       );
     }
 
+    case 'livestream': {
+      // kind:30311 NIP-53 live streams.
+      // Addressable events — the relay only stores the latest per pubkey+d, so
+      // timestamp-based pagination (until) is meaningless and must be skipped.
+      // Always query for all statuses and filter client-side so upcoming/ended
+      // streams can also surface; the FeedView "pin live to top" feature handles ordering.
+      const pubkeys = (source.pubkeys ?? []).map(toPubkeyHex).filter(Boolean);
+      if (pubkeys.length > 0) {
+        // Specific authors requested
+        return nostr.query(
+          [{ kinds: [30311], authors: pubkeys, limit: limit * 2 }],
+          { signal: abort },
+        );
+      }
+      // No author filter — fetch broadly. Query both live and recent ended to
+      // populate the feed; FeedView pins live ones to top when that option is on.
+      return nostr.query(
+        [{ kinds: [30311], '#status': ['live'], limit }],
+        { signal: abort },
+      );
+    }
+
     case 'dvm': {
       // DVM events are pre-fetched in the parent hook — just return them
       // (filtered by until cursor for pagination)
