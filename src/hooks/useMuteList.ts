@@ -1,6 +1,6 @@
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { useCurrentUser } from './useCurrentUser';
 import { useFollowing } from './useFollowing';
 import { useMixstr } from './useMixstr';
@@ -23,15 +23,41 @@ export interface MuteList {
   lists: string[];
 }
 
-function parseMuteEvent(event: NostrEvent | undefined): MuteList {
+async function decryptPrivateTags(
+  user: NonNullable<ReturnType<typeof useCurrentUser>['user']>,
+  ciphertext: string,
+): Promise<string[][]> {
+  if (!ciphertext.trim()) return [];
+  if (!user.signer.nip44) return [];
+  try {
+    const plaintext = await user.signer.nip44.decrypt(user.pubkey, ciphertext);
+    const parsed = JSON.parse(plaintext) as unknown;
+    if (Array.isArray(parsed) && parsed.every((item) => Array.isArray(item))) {
+      return parsed as string[][];
+    }
+  } catch {
+    // ignore decryption/parse failures
+  }
+  return [];
+}
+
+async function parseMuteEvent(
+  event: NostrEvent | undefined,
+  user?: ReturnType<typeof useCurrentUser>['user'],
+): Promise<MuteList> {
   if (!event) return { pubkeys: new Set(), keywords: [], hashtags: [], lists: [] };
-  const keywords = event.tags
+
+  const publicTags = event.tags;
+  const privateTags = user ? await decryptPrivateTags(user, event.content) : [];
+  const allTags = [...publicTags, ...privateTags];
+
+  const keywords = allTags
     .filter(([t]) => t === 'word')
     .map(([, v]) => v.toLowerCase())
     .filter(Boolean);
   const hashtags = Array.from(
     new Set(
-      event.tags
+      allTags
         .filter(([t]) => t === 't')
         .map(([, v]) => v.toLowerCase())
         .filter(Boolean),
@@ -39,11 +65,11 @@ function parseMuteEvent(event: NostrEvent | undefined): MuteList {
   );
   return {
     pubkeys: new Set(
-      event.tags.filter(([t]) => t === 'p').map(([, v]) => v).filter(Boolean),
+      allTags.filter(([t]) => t === 'p').map(([, v]) => v).filter(Boolean),
     ),
     keywords,
     hashtags,
-    lists: event.tags.filter(([t]) => t === 'a').map(([, v]) => v).filter(Boolean),
+    lists: allTags.filter(([t]) => t === 'a').map(([, v]) => v).filter(Boolean),
   };
 }
 
@@ -71,22 +97,20 @@ export function useMuteList() {
   const { data: followingHex = [] } = useFollowing();
   const { spamSettings } = useMixstr();
 
-  const { data: muteEvent } = useQuery<NostrEvent | null>({
+  const { data: muted } = useQuery<MuteList>({
     queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''],
     queryFn: async ({ signal }) => {
-      if (!user?.pubkey) return null;
+      if (!user?.pubkey) return { pubkeys: new Set(), keywords: [], hashtags: [], lists: [] };
       const [ev] = await nostr.query(
         [{ kinds: [10000], authors: [user.pubkey], limit: 1 }],
         { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
       );
-      return ev ?? null;
+      return parseMuteEvent(ev ?? undefined, user);
     },
     enabled: !!user?.pubkey,
     staleTime: 2 * 60 * 1000,
     refetchOnWindowFocus: true,
   });
-
-  const muted = useMemo(() => parseMuteEvent(muteEvent ?? undefined), [muteEvent]);
 
   // Fetch people from subscribed blocklists
   const { data: blockListPubkeys = new Set<string>() } = useQuery<Set<string>>({
