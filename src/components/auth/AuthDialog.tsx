@@ -30,6 +30,7 @@ import {
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { createShareUrl } from '@/lib/url';
 import { generateSecretKey, getPublicKey, nip19 } from 'nostr-tools';
 
 interface AuthDialogProps {
@@ -160,7 +161,7 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
     const relayUrls = login.getRelayUrls();
     const params = generateNostrConnectParams(relayUrls);
     const uri = generateNostrConnectURI(params, {
-      callback: isMobileDevice() ? `${window.location.origin}${window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1)}remoteloginsuccess` : undefined,
+      callback: isMobileDevice() ? createShareUrl('/remoteloginsuccess') : undefined,
     });
     setNostrConnectParams(params);
     setNostrConnectUri(uri);

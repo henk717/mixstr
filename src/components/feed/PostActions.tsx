@@ -109,10 +109,10 @@ export function PostActions({ event, compact = false }: PostActionsProps) {
   async function handleShare(e: React.MouseEvent) {
     e.stopPropagation();
     try {
+      const { createShareUrl } = await import('@/lib/url');
       const { nip19 } = await import('nostr-tools');
       const neventId = nip19.neventEncode({ id: event.id, author: event.pubkey, kind: event.kind });
-      const base = window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
-      const url = `${window.location.origin}${base}${neventId}`;
+      const url = createShareUrl(`/${neventId}`);
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
