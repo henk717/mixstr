@@ -126,7 +126,6 @@ export function useMuteList() {
       const followFilters = chunks.map((authors) => ({
         kinds: [3] as number[],
         authors,
-        since,
         limit: authors.length,
       }));
       const reportFilters = chunks.map((authors) => ({
