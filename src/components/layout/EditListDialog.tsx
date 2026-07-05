@@ -5,7 +5,9 @@ import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { nip19 } from 'nostr-tools';
 import type { NostrMetadata } from '@nostrify/nostrify';
-import { KNOWN_DVMS } from '@/lib/sidebarLists';
+import { useDiscoverDvms } from '@/hooks/useDiscoverDvms';
+import { Loader2 } from 'lucide-react';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Dialog,
   DialogContent,
@@ -228,7 +230,7 @@ function PeopleField({
   );
 }
 
-/** DVM source picker — shows known DVMs as autocomplete, with manual entry */
+/** DVM source picker — discovers live DVMs from the network via NIP-89 */
 function DvmField({
   dvmPubkey,
   onChange,
@@ -236,50 +238,71 @@ function DvmField({
   dvmPubkey: string;
   onChange: (pk: string) => void;
 }) {
-
+  const { data: dvms = [], isLoading } = useDiscoverDvms();
 
   return (
     <div className="space-y-2">
       <Label className="text-xs text-muted-foreground">DVM provider</Label>
 
-      {/* Known DVMs */}
+      {/* Discovered DVMs from network */}
       <div className="space-y-1.5">
-        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Known DVMs</p>
-        {KNOWN_DVMS.map((dvm) => {
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
+          {isLoading ? (
+            <><Loader2 size={10} className="animate-spin" /> Discovering DVMs…</>
+          ) : (
+            `${dvms.length} DVM${dvms.length !== 1 ? 's' : ''} found on network`
+          )}
+        </p>
+
+        {!isLoading && dvms.length === 0 && (
+          <p className="text-xs text-muted-foreground italic">
+            No DVMs advertising kind 5300 support found. Enter one manually below.
+          </p>
+        )}
+
+        {dvms.map((dvm) => {
           const isSelected = dvmPubkey === dvm.pubkey;
           return (
             <button
               key={dvm.pubkey}
               onClick={() => onChange(dvm.pubkey)}
               className={cn(
-                'w-full flex items-start gap-2 text-left px-2.5 py-2 rounded-lg border text-xs transition-colors',
+                'w-full flex items-center gap-2.5 text-left px-2.5 py-2 rounded-lg border text-xs transition-colors',
                 isSelected
                   ? 'border-primary bg-primary/10 text-primary'
                   : 'border-border bg-background hover:bg-accent',
               )}
             >
+              <Avatar className="w-8 h-8 flex-shrink-0">
+                <AvatarImage src={dvm.picture} />
+                <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-bold">
+                  {dvm.name[0]?.toUpperCase() ?? 'D'}
+                </AvatarFallback>
+              </Avatar>
               <div className="flex-1 min-w-0">
-                <p className="font-semibold">{dvm.name}</p>
-                <p className="text-muted-foreground text-[11px]">{dvm.description}</p>
+                <p className="font-semibold truncate">{dvm.name}</p>
+                <p className="text-muted-foreground text-[11px] truncate">{dvm.about}</p>
               </div>
-              {isSelected && <Check size={13} className="flex-shrink-0 mt-0.5" />}
+              {isSelected && <Check size={13} className="flex-shrink-0" />}
             </button>
           );
         })}
       </div>
 
-      {/* Manual entry */}
+      {/* Manual npub entry */}
       <div className="space-y-1">
-        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">Or enter npub manually</p>
+        <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
+          Or enter npub / hex manually
+        </p>
         <Input
           value={dvmPubkey}
           onChange={(e) => onChange(e.target.value.trim())}
-          placeholder="npub1... (DVM provider pubkey)"
+          placeholder="npub1… or 64-char hex pubkey"
           className="h-7 text-xs bg-background"
         />
       </div>
       <p className="text-xs text-muted-foreground">
-        DVM feeds use NIP-90 Data Vending Machines to return curated content.
+        DVM feeds use NIP-90 kind 5300 requests — the provider returns a curated list of events.
       </p>
     </div>
   );

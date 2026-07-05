@@ -162,16 +162,5 @@ export const ICON_OPTIONS: { value: SidebarListIcon; label: string }[] = [
   { value: 'group', label: '💬 Group' },
 ];
 
-/** Well-known DVM providers for autocomplete */
-export const KNOWN_DVMS: { pubkey: string; name: string; description: string }[] = [
-  {
-    pubkey: '7579076d9aff0a4cfdefa7e2045f2486c7e5d8bc63bfc6b45397233e1bbfcb19',
-    name: 'Wikifreedia',
-    description: 'Wikipedia-style content DVM',
-  },
-  {
-    pubkey: '7d4b8806f1fd1fae07c3afe07e7f8b7c640e1cf1a05c5e1b8d0e14e5f3e5e5e5',
-    name: 'Algo Relay',
-    description: 'Algorithmic feed',
-  },
-];
+// DVM providers are now discovered live from the network via useDiscoverDvms
+// (NIP-89 kind 31990 events with k=5300). No hardcoded list needed.
