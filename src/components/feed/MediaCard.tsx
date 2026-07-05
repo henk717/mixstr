@@ -10,6 +10,7 @@ import {
   extractVideos,
   extractExternalEmbeds,
   getEventTitle,
+  isLivestream,
   getLivestreamInfo,
   relativeTime,
   eventToNevent,
