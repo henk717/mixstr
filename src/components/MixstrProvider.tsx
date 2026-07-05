@@ -5,21 +5,29 @@ import {
   saveSidebarLists,
   type SidebarList,
 } from '@/lib/sidebarLists';
+import {
+  loadSpamSettings,
+  saveSpamSettings,
+  mergeSpamSettings,
+  type SpamSettings,
+} from '@/lib/spam';
 import { useMixstrSync, type MixstrConfig } from '@/hooks/useMixstrBackup';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 function MixstrSyncInner({
   sidebarLists,
   feedViewModes,
+  spamSettings,
   onRemoteLoaded,
   onScheduleBackup,
 }: {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
+  spamSettings: SpamSettings;
   onRemoteLoaded: (config: MixstrConfig) => void;
   onScheduleBackup: (fn: () => void) => void;
 }) {
-  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, onRemoteLoaded });
+  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, spamSettings, onRemoteLoaded });
 
   // Expose scheduleBackup up to parent on each render
   useEffect(() => {
@@ -36,6 +44,9 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const [feedViewModes, setFeedViewModes] = useState<Record<string, FeedViewMode>>({});
   const [sidebarLists, setSidebarListsState] = useState<SidebarList[]>(() =>
     loadSidebarLists(undefined),
+  );
+  const [spamSettings, setSpamSettingsState] = useState<SpamSettings>(() =>
+    loadSpamSettings(undefined),
   );
   const [audioQueue, setAudioQueue] = useState<AudioTrack[]>([]);
   const [currentTrack, setCurrentTrack] = useState<AudioTrack | null>(null);
@@ -58,6 +69,9 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     const lists = loadSidebarLists(newPubkey);
     setSidebarListsState(lists);
 
+    // Load spam settings for this account
+    setSpamSettingsState(loadSpamSettings(newPubkey));
+
     // Reset view modes — they'll be restored from the Nostr backup if available
     setFeedViewModes({});
   }, [user?.pubkey]);
@@ -69,6 +83,12 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
       setTimeout(() => scheduleBackupRef.current(), 0);
       return next;
     });
+  }, []);
+
+  const setSpamSettings = useCallback((next: SpamSettings) => {
+    setSpamSettingsState(next);
+    saveSpamSettings(next, activePubkeyRef.current);
+    setTimeout(() => scheduleBackupRef.current(), 0);
   }, []);
 
   // Called when the remote Nostr config is fetched and newer than local
@@ -89,6 +109,15 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
       // Use the remote view modes only if we have nothing local
       if (Object.keys(local).length === 0 && remoteTs > 0) {
         return config.feedViewModes ?? local;
+      }
+      return local;
+    });
+    setSpamSettingsState((local) => {
+      const remoteTs = config.savedAt ?? 0;
+      if (remoteTs > 0 && config.spamSettings) {
+        const merged = mergeSpamSettings(config.spamSettings);
+        saveSpamSettings(merged, activePubkeyRef.current);
+        return merged;
       }
       return local;
     });
@@ -201,6 +230,8 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
         addSidebarList,
         updateSidebarList,
         removeSidebarList,
+        spamSettings,
+        setSpamSettings,
         audioQueue,
         currentTrack,
         isPlaying,
@@ -220,6 +251,7 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
       <MixstrSyncInner
         sidebarLists={sidebarLists}
         feedViewModes={feedViewModes}
+        spamSettings={spamSettings}
         onRemoteLoaded={handleRemoteLoaded}
         onScheduleBackup={(fn) => { scheduleBackupRef.current = fn; }}
       />

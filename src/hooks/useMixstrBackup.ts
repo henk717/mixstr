@@ -20,12 +20,14 @@ import { useCurrentUser } from './useCurrentUser';
 import { useNostrPublish } from './useNostrPublish';
 import type { SidebarList } from '@/lib/sidebarLists';
 import type { FeedViewMode } from '@/contexts/MixstrContext';
+import type { SpamSettings } from '@/lib/spam';
 
 const D_TAG = 'mixstr-config-v1';
 
 export interface MixstrConfig {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
+  spamSettings: SpamSettings;
   savedAt: number;
 }
 
@@ -96,10 +98,12 @@ export function useSaveMixstrConfig() {
 export function useMixstrSync({
   sidebarLists,
   feedViewModes,
+  spamSettings,
   onRemoteLoaded,
 }: {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
+  spamSettings: SpamSettings;
   onRemoteLoaded: (config: MixstrConfig) => void;
 }) {
   const { user } = useCurrentUser();
@@ -133,6 +137,7 @@ export function useMixstrSync({
       const config: MixstrConfig = {
         sidebarLists,
         feedViewModes,
+        spamSettings,
         savedAt: Math.floor(Date.now() / 1000),
       };
       try {
@@ -145,7 +150,7 @@ export function useMixstrSync({
         // Silent — backup is best-effort
       }
     }, 3000);
-  }, [user, sidebarLists, feedViewModes, save, queryClient]);
+  }, [user, sidebarLists, feedViewModes, spamSettings, save, queryClient]);
 
   return {
     isSyncing: fetchStatus === 'pending' || isSaving,

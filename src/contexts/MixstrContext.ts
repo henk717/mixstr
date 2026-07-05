@@ -1,6 +1,7 @@
 import { createContext } from 'react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import type { SidebarList } from '@/lib/sidebarLists';
+import type { SpamSettings } from '@/lib/spam';
 
 export type FeedViewMode = 'short' | 'longform' | 'media' | 'audio';
 
@@ -23,6 +24,10 @@ export interface MixstrContextType {
   addSidebarList: (list: SidebarList) => void;
   updateSidebarList: (id: string, list: Partial<SidebarList>) => void;
   removeSidebarList: (id: string) => void;
+
+  /** Automatic spam-detection settings */
+  spamSettings: SpamSettings;
+  setSpamSettings: (settings: SpamSettings) => void;
 
   /** Audio player queue */
   audioQueue: AudioTrack[];

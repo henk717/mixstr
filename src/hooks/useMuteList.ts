@@ -1,6 +1,15 @@
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo, useRef } from 'react';
 import { useCurrentUser } from './useCurrentUser';
+import { useFollowing } from './useFollowing';
+import { useMixstr } from './useMixstr';
+import {
+  countHashtags,
+  isNonHumanReadable,
+  isReadabilityExempt,
+  type SpamSettings,
+} from '@/lib/spam';
 import type { NostrEvent } from '@nostrify/nostrify';
 
 export interface MuteList {
@@ -23,13 +32,29 @@ function parseMuteEvent(event: NostrEvent | undefined): MuteList {
   };
 }
 
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
+interface TrustMetrics {
+  reportCounts: Map<string, number>;
+  followCounts: Map<string, number>;
+}
+
 /**
- * Returns the current user's NIP-51 mute list (kind 10000).
- * Provides helpers to check if an event should be filtered.
+ * Returns the current user's NIP-51 mute list (kind 10000) combined with any
+ * subscribed blocklists, plus automatic spam-detection filters configured in
+ * the block settings screen.
  */
 export function useMuteList() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
+  const { data: followingHex = [] } = useFollowing();
+  const { spamSettings } = useMixstr();
 
   const { data: muteEvent } = useQuery<NostrEvent | null>({
     queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''],
@@ -46,22 +71,24 @@ export function useMuteList() {
     refetchOnWindowFocus: true,
   });
 
-  const muted = parseMuteEvent(muteEvent ?? undefined);
+  const muted = useMemo(() => parseMuteEvent(muteEvent ?? undefined), [muteEvent]);
 
   // Fetch people from subscribed blocklists
   const { data: blockListPubkeys = new Set<string>() } = useQuery<Set<string>>({
     queryKey: ['nostr', 'block-list-people', muted.lists.join(',')],
     queryFn: async ({ signal }) => {
       if (!muted.lists.length) return new Set<string>();
-      // Parse "kind:pubkey:d-tag" format
-      const filters = muted.lists.map((addr) => {
-        const parts = addr.split(':');
-        if (parts.length < 2) return null;
-        const kind = parseInt(parts[0], 10);
-        const pubkey = parts[1];
-        const identifier = parts.slice(2).join(':');
-        return { kinds: [kind], authors: [pubkey], '#d': [identifier], limit: 1 };
-      }).filter(Boolean) as { kinds: number[]; authors: string[]; '#d': string[]; limit: number }[];
+      const filters = muted.lists
+        .map((addr) => {
+          const parts = addr.split(':');
+          if (parts.length < 2) return null;
+          const kind = parseInt(parts[0], 10);
+          const pubkey = parts[1];
+          const identifier = parts.slice(2).join(':');
+          if (Number.isNaN(kind) || !pubkey) return null;
+          return { kinds: [kind], authors: [pubkey], '#d': [identifier], limit: 1 };
+        })
+        .filter(Boolean) as { kinds: number[]; authors: string[]; '#d': string[]; limit: number }[];
 
       if (!filters.length) return new Set<string>();
 
@@ -81,20 +108,126 @@ export function useMuteList() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Web-of-trust metrics: count reports and follows from people in my network.
+  const { data: trustMetrics } = useQuery<TrustMetrics>({
+    queryKey: [
+      'nostr',
+      'trust-metrics',
+      user?.pubkey ?? '',
+      followingHex.length,
+      followingHex[0] ?? '',
+      spamSettings.webOfTrust.windowDays,
+    ],
+    queryFn: async ({ signal }) => {
+      const since =
+        Math.floor(Date.now() / 1000) - spamSettings.webOfTrust.windowDays * 24 * 60 * 60;
+      const chunks = chunk(followingHex, 200);
+
+      const followFilters = chunks.map((authors) => ({
+        kinds: [3] as number[],
+        authors,
+        since,
+        limit: authors.length,
+      }));
+      const reportFilters = chunks.map((authors) => ({
+        kinds: [1984] as number[],
+        authors,
+        since,
+        limit: 1000,
+      }));
+
+      const [followEvents, reportEvents] = await Promise.all([
+        nostr.query(followFilters, {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        }),
+        nostr.query(reportFilters, {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10000)]),
+        }),
+      ]);
+
+      const reportCounts = new Map<string, number>();
+      const followCounts = new Map<string, number>();
+
+      for (const ev of reportEvents) {
+        for (const tag of ev.tags) {
+          if (tag[0] === 'p' && tag[1]) {
+            reportCounts.set(tag[1], (reportCounts.get(tag[1]) ?? 0) + 1);
+          }
+        }
+      }
+
+      for (const ev of followEvents) {
+        for (const tag of ev.tags) {
+          if (tag[0] === 'p' && tag[1]) {
+            followCounts.set(tag[1], (followCounts.get(tag[1]) ?? 0) + 1);
+          }
+        }
+      }
+
+      return { reportCounts, followCounts };
+    },
+    enabled: !!user?.pubkey && spamSettings.webOfTrust.enabled && followingHex.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Rolling-window post rate tracker for the speed filter.
+  const speedMapRef = useRef<Map<string, number[]>>(new Map());
+
   /** Returns true if the event should be hidden */
-  function isMuted(event: NostrEvent): boolean {
-    // Muted author
-    if (muted.pubkeys.has(event.pubkey)) return true;
-    if (blockListPubkeys.has(event.pubkey)) return true;
+  const isMuted = useCallback(
+    (event: NostrEvent): boolean => {
+      if (!event?.pubkey) return true;
+      if (user?.pubkey === event.pubkey) return false;
 
-    // Muted keyword in content
-    if (muted.keywords.length > 0) {
-      const contentLower = event.content.toLowerCase();
-      if (muted.keywords.some((kw) => contentLower.includes(kw))) return true;
-    }
+      // Explicitly muted author
+      if (muted.pubkeys.has(event.pubkey)) return true;
+      if (blockListPubkeys.has(event.pubkey)) return true;
 
-    return false;
-  }
+      // Muted keyword in content
+      if (muted.keywords.length > 0) {
+        const contentLower = event.content.toLowerCase();
+        if (muted.keywords.some((kw) => contentLower.includes(kw))) return true;
+      }
+
+      // Web of trust
+      if (spamSettings.webOfTrust.enabled && trustMetrics) {
+        const reports = trustMetrics.reportCounts.get(event.pubkey) ?? 0;
+        const follows = trustMetrics.followCounts.get(event.pubkey) ?? 0;
+        // Block if the author has more reports than follows from my network AND
+        // is not followed by anyone in my network.
+        if (follows === 0 && reports > follows) return true;
+      }
+
+      // Hashtag spam
+      if (spamSettings.hashtag.enabled) {
+        if (countHashtags(event) > spamSettings.hashtag.maxTags) return true;
+      }
+
+      // Inhuman posting speed
+      if (spamSettings.speed.enabled) {
+        const windowSec = spamSettings.speed.windowMinutes * 60;
+        const now = event.created_at;
+        if (windowSec > 0) {
+          const timestamps = speedMapRef.current.get(event.pubkey) ?? [];
+          timestamps.push(now);
+          const cutoff = now - windowSec;
+          const recent = timestamps.filter((t) => t >= cutoff);
+          speedMapRef.current.set(event.pubkey, recent);
+          if (recent.length > spamSettings.speed.maxEvents) return true;
+        }
+      }
+
+      // Non-human-readable / JSON / base64 spam
+      if (spamSettings.readability.enabled && !isReadabilityExempt(event)) {
+        if (isNonHumanReadable(event.content, spamSettings.readability.minBase64Length)) {
+          return true;
+        }
+      }
+
+      return false;
+    },
+    [muted, blockListPubkeys, trustMetrics, spamSettings, user?.pubkey],
+  );
 
   return { muted, blockListPubkeys, isMuted };
 }

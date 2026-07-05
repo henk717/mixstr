@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { User, Shield, X, Plus, Search, Check, RefreshCw, Wifi, Trash2 } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
@@ -8,6 +8,8 @@ import { useNostr } from '@nostrify/react';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useMixstr } from '@/hooks/useMixstr';
+import { useMuteList } from '@/hooks/useMuteList';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -20,7 +22,8 @@ import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
 import { SUGGESTED_RELAYS } from '@/lib/appRelays';
-import type { NostrEvent, NostrMetadata } from '@nostrify/nostrify';
+import type { SpamSettings } from '@/lib/spam';
+import type { NostrMetadata } from '@nostrify/nostrify';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -172,46 +175,47 @@ function PeoplePicker({
 }
 
 // ---------------------------------------------------------------------------
-// Block Settings — NIP-51 kind 10000 mute list
+// Block Settings — NIP-51 kind 10000 mute list + spam detection
 // ---------------------------------------------------------------------------
 
-interface MuteList {
-  pubkeys: string[];    // p tags — muted people
-  keywords: string[];  // word tags — muted keywords (Amethyst compatible)
-  lists: string[];     // a tags — external lists acting as blocklists (naddr)
-}
-
-function parseMuteEvent(event: NostrEvent | undefined): MuteList {
-  if (!event) return { pubkeys: [], keywords: [], lists: [] };
-  return {
-    pubkeys: event.tags.filter(([t]) => t === 'p').map(([, v]) => v).filter(Boolean),
-    keywords: event.tags.filter(([t]) => t === 'word').map(([, v]) => v).filter(Boolean),
-    lists: event.tags.filter(([t]) => t === 'a').map(([, v]) => v).filter(Boolean),
-  };
+function SpamToggle({
+  label,
+  description,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-3 border-b border-border last:border-0">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{description}</p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} className="flex-shrink-0" />
+    </div>
+  );
 }
 
 function BlockSettings() {
   const { user } = useCurrentUser();
-  const { nostr } = useNostr();
   const { mutateAsync: publish, isPending } = useNostrPublish();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { muted, blockListPubkeys } = useMuteList();
+  const { spamSettings, setSpamSettings } = useMixstr();
 
-  const { data: muteEvent, isLoading, isFetching } = useQuery<NostrEvent | null>({
-    queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''],
-    queryFn: async ({ signal }) => {
-      if (!user?.pubkey) return null;
-      const [ev] = await nostr.query(
-        [{ kinds: [10000], authors: [user.pubkey], limit: 1 }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
-      );
-      return ev ?? null;
-    },
-    enabled: !!user?.pubkey,
-    staleTime: 0, // Always re-fetch to get latest from relays (important for Amethyst import)
-  });
-
-  const remote = useMemo(() => parseMuteEvent(muteEvent ?? undefined), [muteEvent]);
+  const remote = useMemo(
+    () => ({
+      pubkeys: Array.from(muted.pubkeys),
+      keywords: muted.keywords,
+      lists: muted.lists,
+    }),
+    [muted],
+  );
 
   const [pubkeys, setPubkeys] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -219,20 +223,16 @@ function BlockSettings() {
   const [keywordInput, setKeywordInput] = useState('');
   const [listInput, setListInput] = useState('');
 
-  // Sync remote → local once loaded
+  // Sync remote → local once loaded so the settings page opens instantly.
   const [synced, setSynced] = useState(false);
-  if (!synced && !isLoading && muteEvent !== undefined) {
-    setPubkeys(remote.pubkeys);
-    setKeywords(remote.keywords);
-    setLists(remote.lists);
-    setSynced(true);
-  }
-
-  const handleRefreshFromRelays = async () => {
-    setSynced(false);
-    await queryClient.invalidateQueries({ queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''] });
-    toast({ title: 'Fetching from relays…', description: 'Your block list will update shortly.' });
-  };
+  useEffect(() => {
+    if (!synced) {
+      setPubkeys(remote.pubkeys);
+      setKeywords(remote.keywords);
+      setLists(remote.lists);
+      setSynced(true);
+    }
+  }, [synced, remote]);
 
   const addKeyword = () => {
     const kw = keywordInput.trim();
@@ -268,11 +268,25 @@ function BlockSettings() {
     try {
       await publish({ kind: 10000, content: '', tags });
       queryClient.invalidateQueries({ queryKey: ['nostr', 'mute-list', user.pubkey] });
-      toast({ title: 'Block list saved', description: 'Your mute/block settings have been published to Nostr.' });
+      toast({
+        title: 'Block list saved',
+        description: 'Your mute/block settings have been published to Nostr.',
+      });
     } catch {
-      toast({ title: 'Failed to save', description: 'Could not publish block list. Try again.', variant: 'destructive' });
+      toast({
+        title: 'Failed to save',
+        description: 'Could not publish block list. Try again.',
+        variant: 'destructive',
+      });
     }
   };
+
+  const updateSpam = useCallback(
+    (patch: Partial<SpamSettings>) => {
+      setSpamSettings({ ...spamSettings, ...patch });
+    },
+    [spamSettings, setSpamSettings],
+  );
 
   if (!user) {
     return (
@@ -287,41 +301,16 @@ function BlockSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Import banner */}
-      <Card className="border-primary/20 bg-primary/5">
-        <CardContent className="py-3 px-4 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">Import from Relays</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isLoading || isFetching
-                ? 'Fetching your block list from Nostr relays…'
-                : muteEvent
-                  ? `Found ${remote.pubkeys.length} blocked people, ${remote.keywords.length} keywords on your relays (Amethyst-compatible).`
-                  : 'No existing block list found on relays.'}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleRefreshFromRelays}
-            disabled={isLoading || isFetching}
-            className="flex-shrink-0"
-          >
-            {isFetching ? (
-              <RefreshCw size={12} className="animate-spin mr-1.5" />
-            ) : (
-              <RefreshCw size={12} className="mr-1.5" />
-            )}
-            Refresh
-          </Button>
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Blocked People</CardTitle>
           <CardDescription className="text-xs">
             Posts from these users won't appear in your feeds. Published as NIP-51 kind 10000 mute list.
+            {blockListPubkeys.size > 0 && (
+              <span className="block mt-1 text-primary">
+                {blockListPubkeys.size} additional {blockListPubkeys.size === 1 ? 'person' : 'people'} currently blocked via subscribed lists.
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -391,7 +380,10 @@ function BlockSettings() {
                 const parts = l.split(':');
                 if (parts.length === 3) display = `Kind ${parts[0]} list by …${parts[1].slice(-8)}`;
                 return (
-                  <div key={l} className="flex items-center justify-between gap-2 text-xs bg-card border border-border rounded-lg px-3 py-2">
+                  <div
+                    key={l}
+                    className="flex items-center justify-between gap-2 text-xs bg-card border border-border rounded-lg px-3 py-2"
+                  >
                     <span className="truncate text-foreground">{display}</span>
                     <button
                       onClick={() => setLists((prev) => prev.filter((x) => x !== l))}
@@ -420,6 +412,142 @@ function BlockSettings() {
             Paste the naddr of a NIP-51 people set or follow list. People in that list will be blocked.
             Great for subscribing to community spam/scam blocklists.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Automatic Spam Detection</CardTitle>
+          <CardDescription className="text-xs">
+            Client-side filters that hide spam from your feeds. These settings are stored with your
+            Mixstr backup and never published as public events.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-1">
+          <SpamToggle
+            label="Web of Trust"
+            description="Block accounts that have more reports than follows from people I follow, when they aren't followed by anyone in my network."
+            checked={spamSettings.webOfTrust.enabled}
+            onCheckedChange={(checked) =>
+              updateSpam({ webOfTrust: { ...spamSettings.webOfTrust, enabled: checked } })
+            }
+          />
+          {spamSettings.webOfTrust.enabled && (
+            <div className="flex items-center gap-2 pb-3">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Look-back window</Label>
+              <Input
+                type="number"
+                min={1}
+                max={365}
+                value={spamSettings.webOfTrust.windowDays}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(v) && v > 0) {
+                    updateSpam({ webOfTrust: { ...spamSettings.webOfTrust, windowDays: v } });
+                  }
+                }}
+                className="h-7 text-sm w-20"
+              />
+              <span className="text-xs text-muted-foreground">days</span>
+            </div>
+          )}
+
+          <SpamToggle
+            label="Hashtag spam"
+            description="Hide posts that are overloaded with hashtag tags."
+            checked={spamSettings.hashtag.enabled}
+            onCheckedChange={(checked) =>
+              updateSpam({ hashtag: { ...spamSettings.hashtag, enabled: checked } })
+            }
+          />
+          {spamSettings.hashtag.enabled && (
+            <div className="flex items-center gap-2 pb-3">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Max hashtags</Label>
+              <Input
+                type="number"
+                min={1}
+                max={100}
+                value={spamSettings.hashtag.maxTags}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(v) && v > 0) {
+                    updateSpam({ hashtag: { ...spamSettings.hashtag, maxTags: v } });
+                  }
+                }}
+                className="h-7 text-sm w-20"
+              />
+            </div>
+          )}
+
+          <SpamToggle
+            label="Inhuman posting speed"
+            description="Hide accounts that publish more posts than a human realistically could within a short rolling window."
+            checked={spamSettings.speed.enabled}
+            onCheckedChange={(checked) =>
+              updateSpam({ speed: { ...spamSettings.speed, enabled: checked } })
+            }
+          />
+          {spamSettings.speed.enabled && (
+            <div className="flex flex-wrap items-center gap-2 pb-3">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">More than</Label>
+              <Input
+                type="number"
+                min={1}
+                max={1000}
+                value={spamSettings.speed.maxEvents}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(v) && v > 0) {
+                    updateSpam({ speed: { ...spamSettings.speed, maxEvents: v } });
+                  }
+                }}
+                className="h-7 text-sm w-20"
+              />
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">posts in</Label>
+              <Input
+                type="number"
+                min={1}
+                max={1440}
+                value={spamSettings.speed.windowMinutes}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(v) && v > 0) {
+                    updateSpam({ speed: { ...spamSettings.speed, windowMinutes: v } });
+                  }
+                }}
+                className="h-7 text-sm w-20"
+              />
+              <span className="text-xs text-muted-foreground">minutes</span>
+            </div>
+          )}
+
+          <SpamToggle
+            label="JSON / base64 spam"
+            description="Hide posts whose content looks like raw JSON or a base64 blob rather than human-readable text. Known structured kinds such as livestreams, audio, and articles are always kept."
+            checked={spamSettings.readability.enabled}
+            onCheckedChange={(checked) =>
+              updateSpam({ readability: { ...spamSettings.readability, enabled: checked } })
+            }
+          />
+          {spamSettings.readability.enabled && (
+            <div className="flex items-center gap-2 pb-3">
+              <Label className="text-xs text-muted-foreground whitespace-nowrap">Min base64 length</Label>
+              <Input
+                type="number"
+                min={20}
+                max={500}
+                value={spamSettings.readability.minBase64Length}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (!Number.isNaN(v) && v > 0) {
+                    updateSpam({ readability: { ...spamSettings.readability, minBase64Length: v } });
+                  }
+                }}
+                className="h-7 text-sm w-20"
+              />
+              <span className="text-xs text-muted-foreground">chars</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -666,15 +794,51 @@ function RelaySettings() {
 
 export function SettingsPage() {
   const { user } = useCurrentUser();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const [isResyncing, setIsResyncing] = useState(false);
 
   useSeoMeta({ title: 'Settings · Mixstr' });
+
+  const handleResync = async () => {
+    if (!user || isResyncing) return;
+    setIsResyncing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['nostr', 'mute-list', user.pubkey] }),
+        queryClient.invalidateQueries({ queryKey: ['nostr', 'following', user.pubkey] }),
+        queryClient.invalidateQueries({ queryKey: ['nostr', 'author', user.pubkey] }),
+        queryClient.invalidateQueries({ queryKey: ['nostr', 'trust-metrics', user.pubkey] }),
+      ]);
+      toast({
+        title: 'Resyncing from relays',
+        description: 'Profile, follows, block list, and trust data are being refreshed.',
+      });
+    } finally {
+      setIsResyncing(false);
+    }
+  };
 
   return (
     <div className="max-w-2xl mx-auto pb-16">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border px-4 py-4">
-        <h1 className="text-xl font-bold text-foreground">Settings</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Manage your profile, relays, and privacy</p>
+      <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border px-4 py-4 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold text-foreground">Settings</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">Manage your profile, relays, and privacy</p>
+        </div>
+        {user && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleResync()}
+            disabled={isResyncing}
+            className="flex-shrink-0 h-8"
+          >
+            <RefreshCw size={12} className={cn('mr-1.5', isResyncing && 'animate-spin')} />
+            Resync
+          </Button>
+        )}
       </div>
 
       <div className="px-4 pt-4">
