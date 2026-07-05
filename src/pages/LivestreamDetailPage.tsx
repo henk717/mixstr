@@ -7,6 +7,7 @@ import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useEventById } from '@/hooks/useEventById';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { getLivestreamInfo, relativeTime } from '@/lib/postUtils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -21,43 +22,13 @@ import { Link } from 'react-router-dom';
 interface LivestreamDetailPageProps {
   pubkey: string;
   dTag: string;
-}
-
-// ── Live chat message ────────────────────────────────────────────────────────
-
-function ChatMessage({ event }: { event: NostrEvent }) {
-  const author = useAuthor(event.pubkey);
-  const meta = author.data?.metadata;
-  const npub = nip19.npubEncode(event.pubkey);
-  const displayName = meta?.display_name || meta?.name || event.pubkey.slice(0, 8) + '…';
-
-  return (
-    <div className="flex gap-2 py-1.5 group">
-      <Link to={`/${npub}`} className="flex-shrink-0 mt-0.5" onClick={(e) => e.stopPropagation()}>
-        <Avatar className="w-6 h-6">
-          <AvatarImage src={meta?.picture} />
-          <AvatarFallback className="text-[9px] bg-primary/20 text-primary font-bold">
-            {displayName[0].toUpperCase()}
-          </AvatarFallback>
-        </Avatar>
-      </Link>
-      <div className="min-w-0 flex-1">
-        <Link
-          to={`/${npub}`}
-          className="text-xs font-semibold text-primary hover:underline mr-1.5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {displayName}
-        </Link>
-        <span className="text-xs text-foreground break-words">{event.content}</span>
-      </div>
-    </div>
-  );
+  /** Relay URLs from the NIP-19 identifier that are known to have this stream. */
+  relays?: string[];
 }
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
-export function LivestreamDetailPage({ pubkey, dTag }: LivestreamDetailPageProps) {
+export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailPageProps) {
   const { nostr } = useNostr();
   const navigate = useNavigate();
   const { user } = useCurrentUser();
@@ -65,17 +36,14 @@ export function LivestreamDetailPage({ pubkey, dTag }: LivestreamDetailPageProps
   const [chatMsg, setChatMsg] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch the livestream event
-  const { data: event, isLoading } = useQuery<NostrEvent | null>({
-    queryKey: ['nostr', 'livestream-event', pubkey, dTag],
-    queryFn: async ({ signal }) => {
-      const [ev] = await nostr.query(
-        [{ kinds: [30311], authors: [pubkey], '#d': [dTag], limit: 1 }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
-      );
-      return ev ?? null;
-    },
-    staleTime: 30 * 1000,
+  // Fetch the livestream event, probing any relay hints first.
+  const { data: event, isLoading } = useEventById({
+    eventId: dTag,
+    pubkey,
+    kind: 30311,
+    relayHints: relays,
+    timeoutMs: 8000,
+    staleTime: 5 * 1000,
     refetchInterval: 30 * 1000, // Re-fetch every 30s to get viewer count updates
   });
 

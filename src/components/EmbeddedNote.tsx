@@ -27,8 +27,6 @@ const MAX_DEPTH = 3;
  * Limits recursion to MAX_DEPTH (3) layers deep to avoid infinite loops.
  */
 export function EmbeddedNote({ eventId, relays, authorHint, className, depth = 0 }: EmbeddedNoteProps) {
-  const { nostr } = useNostr();
-
   const neventId = nip19.neventEncode({
     id: eventId,
     ...(authorHint ? { author: authorHint } : {}),

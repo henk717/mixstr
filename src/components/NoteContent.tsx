@@ -32,6 +32,7 @@ export interface AddrCoords {
   kind: number;
   pubkey: string;
   identifier: string;
+  relays?: string[];
 }
 
 interface NoteContentProps {
@@ -407,7 +408,15 @@ export function NoteContent({
               author: decoded.data.author,
             });
           } else if (decoded.type === 'naddr') {
-            result.push({ type: 'naddr-embed', addr: decoded.data as AddrCoords });
+            result.push({
+              type: 'naddr-embed',
+              addr: {
+                kind: decoded.data.kind,
+                pubkey: decoded.data.pubkey,
+                identifier: decoded.data.identifier,
+                relays: decoded.data.relays,
+              },
+            });
           } else {
             result.push({ type: 'nostr-link', id: nostrId, raw: fullMatch });
           }
@@ -775,7 +784,12 @@ export function NoteContent({
             return <EmbeddedNote key={i} eventId={token.eventId} relays={token.relays} authorHint={token.author} className="my-2.5" depth={depth + 1} />;
           case 'naddr-embed':
             if (disableNoteEmbeds) {
-              const naddrId = nip19.naddrEncode({ kind: token.addr.kind, pubkey: token.addr.pubkey, identifier: token.addr.identifier });
+              const naddrId = nip19.naddrEncode({
+                kind: token.addr.kind,
+                pubkey: token.addr.pubkey,
+                identifier: token.addr.identifier,
+                ...(token.addr.relays?.length ? { relays: token.addr.relays } : {}),
+              });
               return (
                 <Link
                   key={i}

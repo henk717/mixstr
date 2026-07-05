@@ -23,6 +23,7 @@ export function EmbeddedNaddr({ addr, className }: EmbeddedNaddrProps) {
     kind: addr.kind,
     pubkey: addr.pubkey,
     identifier: addr.identifier,
+    ...(addr.relays?.length ? { relays: addr.relays } : {}),
   });
 
   return (

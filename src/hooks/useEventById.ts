@@ -11,6 +11,8 @@ interface UseEventByIdOptions {
   timeoutMs?: number;
   enabled?: boolean;
   staleTime?: number;
+  refetchInterval?: number | false;
+  refetchOnWindowFocus?: boolean | 'always';
 }
 
 /**
@@ -19,7 +21,17 @@ interface UseEventByIdOptions {
  * are also probed directly and the first successful result wins.
  */
 export function useEventById(options: UseEventByIdOptions) {
-  const { eventId, pubkey, kind, relayHints, timeoutMs, enabled = true, staleTime = 5 * 60 * 1000 } = options;
+  const {
+    eventId,
+    pubkey,
+    kind,
+    relayHints,
+    timeoutMs,
+    enabled = true,
+    staleTime = 5 * 60 * 1000,
+    refetchInterval,
+    refetchOnWindowFocus,
+  } = options;
   const { nostr } = useNostr();
 
   return useQuery<NostrEvent | null>({
@@ -52,5 +64,7 @@ export function useEventById(options: UseEventByIdOptions) {
     },
     enabled: !!eventId && enabled,
     staleTime,
+    refetchInterval,
+    refetchOnWindowFocus,
   });
 }

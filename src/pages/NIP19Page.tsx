@@ -59,7 +59,7 @@ export function NIP19Page() {
       if (kind === 30311) {
         return (
           <MainLayout>
-            <LivestreamDetailPage pubkey={pubkey} dTag={dTag} />
+            <LivestreamDetailPage pubkey={pubkey} dTag={dTag} relays={decoded.data.relays} />
           </MainLayout>
         );
       }
