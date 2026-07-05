@@ -1,13 +1,14 @@
 import { useNostr } from '@nostrify/react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
+import { nip19 } from 'nostr-tools';
 import { useFollowing } from './useFollowing';
 import { useCurrentUser } from './useCurrentUser';
 import { useCommunityMetas, isModeratorOf } from './useCommunity';
-import type { SidebarList, ListSource } from '@/lib/sidebarLists';
-import { nip19 } from 'nostr-tools';
 import { useNostrPublish } from './useNostrPublish';
 import { isRepost } from '@/lib/postUtils';
+import { fetchDvmFeedEvents } from '@/lib/dvm';
+import type { SidebarList, ListSource } from '@/lib/sidebarLists';
 
 const PAGE_SIZE = 30;
 
@@ -86,36 +87,6 @@ function toPubkeyHex(value: string): string {
  * Infinite-scroll feed for a SidebarList.
  * Uses timestamp-based pagination (until cursor) per Nostr convention.
  */
-/** Extract event IDs from a kind 6300 DVM result event */
-function extractDvmEventIds(result: NostrEvent): string[] {
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  const add = (id: string) => {
-    const clean = id.trim();
-    if (clean.length === 64 && /^[0-9a-f]+$/i.test(clean) && !seen.has(clean)) {
-      seen.add(clean);
-      ids.push(clean);
-    }
-  };
-  for (const tag of result.tags) {
-    if (tag[0] === 'e' && tag[1]) add(tag[1]);
-  }
-  if (result.content) {
-    try {
-      const parsed = JSON.parse(result.content);
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (typeof item === 'string') add(item);
-          if (typeof item === 'object' && item?.id) add(item.id);
-        }
-      }
-    } catch {
-      for (const line of result.content.split('\n')) add(line);
-    }
-  }
-  return ids;
-}
-
 export function useListFeed(list: SidebarList) {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
@@ -136,53 +107,22 @@ export function useListFeed(list: SidebarList) {
     queryKey: ['nostr', 'list-dvm-results', list.id, dvmSources.map((s) => s.dvmPubkey).join(','), user?.pubkey ?? ''],
     queryFn: async ({ signal }) => {
       if (dvmSources.length === 0) return [];
-      const abort = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
-      const allIds: string[] = [];
-
-      for (const source of dvmSources) {
-        const dvmHex = toPubkeyHex(source.dvmPubkey!);
-        let requestId: string | undefined;
-
-        // Publish kind 5300 if signed in
-        if (user) {
-          try {
-            const req = await publish({
-              kind: 5300,
-              content: '',
-              tags: [
-                ['p', dvmHex],
-                ['output', 'application/json'],
-                ['param', 'limit', '30'],
-              ],
-            });
-            requestId = req?.id;
-          } catch {}
-        }
-
-        // Fetch kind 6300 result — prefer response to our request, fallback to any recent
-        const filters = requestId
-          ? [
-              { kinds: [6300], authors: [dvmHex], '#e': [requestId], limit: 1 },
-              { kinds: [6300], authors: [dvmHex], limit: 1 },
-            ]
-          : [{ kinds: [6300], authors: [dvmHex], limit: 1 }];
-
-        const results = await nostr.query(filters, { signal: abort });
-        const best = results.sort((a, b) => b.created_at - a.created_at)[0];
-        if (best) {
-          allIds.push(...extractDvmEventIds(best));
-        }
-      }
-
-      if (allIds.length === 0) return [];
-
-      // Fetch the actual events
-      const chunks: string[][] = [];
-      for (let i = 0; i < allIds.length; i += 50) chunks.push(allIds.slice(i, i + 50));
-      const fetched = await Promise.all(
-        chunks.map((ids) => nostr.query([{ ids, limit: ids.length }], { signal: abort })),
+      const results = await Promise.allSettled(
+        dvmSources.map((source) =>
+          fetchDvmFeedEvents({
+            nostr,
+            publish,
+            user,
+            dvmPubkey: source.dvmPubkey!,
+            limit: PAGE_SIZE,
+            timeoutMs: 15_000,
+            signal,
+          }),
+        ),
       );
-      return fetched.flat();
+      return results
+        .filter((r): r is PromiseFulfilledResult<NostrEvent[]> => r.status === 'fulfilled')
+        .flatMap((r) => r.value);
     },
     enabled: dvmSources.length > 0,
     staleTime: 3 * 60 * 1000,
