@@ -3,10 +3,12 @@ import { useNavigate, Link } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
+import { Lightbox } from '@/components/ImageGallery';
 import { cn } from '@/lib/utils';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
 import { NoteContent } from '@/components/NoteContent';
+import { FeedImageGallery } from './FeedImageGallery';
 import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
 import {
   extractImages,
@@ -49,6 +51,7 @@ const TEXT_ONLY_CLAMP = 2000;
 
 export function LongPostCard({ event }: LongPostCardProps) {
   const [textExpanded, setTextExpanded] = useState(false);
+  const [coverLightboxOpen, setCoverLightboxOpen] = useState(false);
   const navigate = useNavigate();
   const nevent = eventToNevent(event);
 
@@ -99,45 +102,64 @@ export function LongPostCard({ event }: LongPostCardProps) {
         <div className="mt-3 space-y-3">
           {longform ? (
             /* ── Long-form article (kind 30023) ── */
-            <div className="rounded-xl border border-border overflow-hidden bg-card">
-              {cover && (
-                <img
-                  src={cover}
-                  alt={title ?? 'Article'}
-                  className="w-full h-52 object-cover"
-                  loading="lazy"
+            <>
+              <div className="rounded-xl border border-border overflow-hidden bg-card">
+                {cover && (
+                  <button
+                    type="button"
+                    className="block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                    aria-label="View cover image"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCoverLightboxOpen(true);
+                    }}
+                  >
+                    <img
+                      src={cover}
+                      alt={title ?? 'Article'}
+                      className="w-full h-52 object-cover hover:opacity-90 transition-opacity"
+                      loading="lazy"
+                    />
+                  </button>
+                )}
+                <div className="p-4 space-y-2">
+                  {title && (
+                    <h2 className="font-bold text-base text-foreground leading-snug">{title}</h2>
+                  )}
+                  {summary && (
+                    <p className="text-sm text-muted-foreground">{summary}</p>
+                  )}
+                  <NoteContent
+                    event={event}
+                    className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
+                    inlineExternalEmbeds
+                  />
+                  {shouldClampText && (
+                    <button
+                      className="text-xs text-primary flex items-center gap-1 hover:underline"
+                      onClick={(e) => { e.stopPropagation(); setTextExpanded(true); }}
+                    >
+                      <ChevronDown size={14} /> Read more
+                    </button>
+                  )}
+                  {isVeryLong && textExpanded && (
+                    <button
+                      className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
+                      onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
+                    >
+                      <ChevronUp size={14} /> Show less
+                    </button>
+                  )}
+                </div>
+              </div>
+              {cover && coverLightboxOpen && (
+                <Lightbox
+                  images={[cover]}
+                  currentIndex={0}
+                  onClose={() => setCoverLightboxOpen(false)}
                 />
               )}
-              <div className="p-4 space-y-2">
-                {title && (
-                  <h2 className="font-bold text-base text-foreground leading-snug">{title}</h2>
-                )}
-                {summary && (
-                  <p className="text-sm text-muted-foreground">{summary}</p>
-                )}
-              <NoteContent
-                event={event}
-                className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
-                inlineExternalEmbeds
-              />
-                {shouldClampText && (
-                  <button
-                    className="text-xs text-primary flex items-center gap-1 hover:underline"
-                    onClick={(e) => { e.stopPropagation(); setTextExpanded(true); }}
-                  >
-                    <ChevronDown size={14} /> Read more
-                  </button>
-                )}
-                {isVeryLong && textExpanded && (
-                  <button
-                    className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
-                    onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
-                  >
-                    <ChevronUp size={14} /> Show less
-                  </button>
-                )}
-              </div>
-            </div>
+            </>
           ) : (
             /* ── Regular post ── */
             <>
@@ -172,25 +194,7 @@ export function LongPostCard({ event }: LongPostCardProps) {
               )}
 
               {/* ── Images ── */}
-              {images.length > 0 && (
-                <div
-                  className={cn(
-                    'grid gap-1 rounded-xl overflow-hidden',
-                    images.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
-                  )}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {images.slice(0, 4).map((url, i) => (
-                    <img
-                      key={i}
-                      src={url}
-                      alt=""
-                      className="w-full object-cover aspect-video"
-                      loading="lazy"
-                    />
-                  ))}
-                </div>
-              )}
+              {images.length > 0 && <FeedImageGallery images={images} />}
 
               {/* ── Videos ── */}
               {videos.length > 0 && (

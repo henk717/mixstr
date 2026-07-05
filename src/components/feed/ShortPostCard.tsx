@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
 import { NoteContent } from '@/components/NoteContent';
+import { FeedImageGallery } from './FeedImageGallery';
 import { ReplyingToChip } from './ReplyContext';
 import {
   extractImages,
@@ -181,25 +182,7 @@ export function ShortPostCard({ event }: ShortPostCardProps) {
             <div className="mt-2">
               {mediaExpanded ? (
                 <>
-                  {images.length > 0 && (
-                    <div
-                      className={cn(
-                        'grid gap-1 rounded-xl overflow-hidden',
-                        images.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
-                      )}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {images.slice(0, 4).map((url, i) => (
-                        <img
-                          key={i}
-                          src={url}
-                          alt=""
-                          className="w-full object-cover aspect-video"
-                          loading="lazy"
-                        />
-                      ))}
-                    </div>
-                  )}
+                  {images.length > 0 && <FeedImageGallery images={images} />}
 
                   {videos.length > 0 && (
                     <div className="mt-1 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
