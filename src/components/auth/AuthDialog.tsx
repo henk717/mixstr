@@ -160,7 +160,7 @@ const AuthDialog: React.FC<AuthDialogProps> = ({ isOpen, onClose }) => {
     const relayUrls = login.getRelayUrls();
     const params = generateNostrConnectParams(relayUrls);
     const uri = generateNostrConnectURI(params, {
-      callback: isMobileDevice() ? `${window.location.origin}/remoteloginsuccess` : undefined,
+      callback: isMobileDevice() ? `${window.location.origin}${window.location.pathname.endsWith('/') ? window.location.pathname : window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1)}remoteloginsuccess` : undefined,
     });
     setNostrConnectParams(params);
     setNostrConnectUri(uri);
