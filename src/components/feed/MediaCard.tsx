@@ -4,17 +4,16 @@ import { Play, Image, Plus, Wifi, CheckCircle, Rss } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
+import { RepostBanner } from './RepostBanner';
 import {
   extractImages,
   extractVideos,
   extractExternalEmbeds,
   getEventTitle,
   getLivestreamInfo,
-  isLivestream,
   relativeTime,
   eventToNevent,
   getAudioTrackInfo,
-  tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -22,6 +21,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useMixstr } from '@/hooks/useMixstr';
 import { useVideoThumbnail } from '@/hooks/useVideoThumbnail';
+import { useResolvedEvent } from '@/hooks/useResolvedEvent';
 import type { AudioTrack } from '@/contexts/MixstrContext';
 
 interface MediaCardProps {
@@ -33,8 +33,8 @@ interface MediaCardProps {
 export function MediaCard({ event, moderation }: MediaCardProps) {
   const navigate = useNavigate();
 
-  // Reposts and community approvals wrap the real post as JSON in content.
-  const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
+  // Resolve repost/community-approval wrappers to the original event.
+  const { event: displayEvent, wrapper } = useResolvedEvent(event);
   const isRss = isRssSyntheticEvent(displayEvent);
   const rssLink = isRss ? displayEvent.tags.find(([k]) => k === 'link')?.[1] : undefined;
   const rssFeedTitle = isRss ? displayEvent.tags.find(([k]) => k === 'feedTitle')?.[1] : undefined;
@@ -98,6 +98,11 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
       className="group cursor-pointer rounded-xl overflow-hidden bg-card border border-border hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/10"
       onClick={handleCardClick}
     >
+      {/* ── Repost / community approval banner ── */}
+      {wrapper && (
+        <RepostBanner wrapper={wrapper} className="px-3 pt-2 pb-0" />
+      )}
+
       {/* Thumbnail area */}
       <div className="relative aspect-video bg-black overflow-hidden">
         {displayThumbnail ? (

@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { ChevronDown, ChevronUp, Repeat2, Play, ExternalLink, CheckCircle } from 'lucide-react';
+import { ChevronDown, ChevronUp, Play, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
 import { RssAuthorHeader } from './RssAuthorHeader';
 import { RssOpenRow } from './RssOpenRow';
+import { RepostBanner } from './RepostBanner';
 import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
 import { Button } from '@/components/ui/button';
@@ -19,17 +20,14 @@ import {
   getCoverImage,
   getSummary,
   isReply,
-  isRepost,
   isLongform,
   eventToNevent,
   getParentEventId,
-  tryExtractEmbeddedEvent,
-  isCommunityApproval,
   findRelayHintForEvent,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
-import { useAuthor } from '@/hooks/useAuthor';
 import { useParentEvent } from '@/hooks/useParentEvent';
+import { useResolvedEvent } from '@/hooks/useResolvedEvent';
 
 interface ShortPostCardProps {
   event: NostrEvent;
@@ -42,13 +40,8 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   const [mediaExpanded, setMediaExpanded] = useState(false);
   const navigate = useNavigate();
 
-  // Reposts and community approvals wrap the real post as JSON in content.
-  const repost = isRepost(event);
-  const approval = isCommunityApproval(event);
-  const embeddedEvent = tryExtractEmbeddedEvent(event);
-
-  // Use the embedded event for display when available, otherwise use the outer event
-  const displayEvent = embeddedEvent ?? event;
+  // Resolve repost/community-approval wrappers to the original event.
+  const { event: displayEvent, wrapper } = useResolvedEvent(event);
 
   const isLong = displayEvent.content.length > 280;
   const images = extractImages(displayEvent);
@@ -59,7 +52,7 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   const title = getEventTitle(displayEvent);
   const cover = getCoverImage(displayEvent);
   const summary = getSummary(displayEvent);
-  const relayHint = embeddedEvent ? findRelayHintForEvent(event, embeddedEvent.id) : undefined;
+  const relayHint = wrapper ? findRelayHintForEvent(event, displayEvent.id) : undefined;
   const nevent = eventToNevent(displayEvent, relayHint ? [relayHint] : undefined);
   const isRss = isRssSyntheticEvent(displayEvent);
 
@@ -90,17 +83,8 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   return (
     <article className="border-b border-border">
       {/* ── Repost / community approval banner ── */}
-      {repost && (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-2.5 px-4 pb-0.5 pl-[54px]">
-          <Repeat2 size={13} />
-          <RepostLabel pubkey={event.pubkey} />
-        </div>
-      )}
-      {approval && embeddedEvent && (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-2.5 px-4 pb-0.5 pl-[54px]">
-          <CheckCircle size={13} />
-          <ApprovalLabel pubkey={event.pubkey} />
-        </div>
+      {wrapper && (
+        <RepostBanner wrapper={wrapper} className="pt-2.5 px-4 pb-0.5 pl-[54px]" />
       )}
 
       {/* ── Compact "Replying to" chip (short view keeps it minimal) ── */}
@@ -121,8 +105,8 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
           <RssAuthorHeader event={displayEvent} compact />
         ) : (
           <PostAuthor
-            pubkey={embeddedEvent ? embeddedEvent.pubkey : event.pubkey}
-            createdAt={embeddedEvent ? embeddedEvent.created_at : event.created_at}
+            pubkey={displayEvent.pubkey}
+            createdAt={displayEvent.created_at}
             compact
           />
         )}
@@ -303,16 +287,4 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   );
 }
 
-function RepostLabel({ pubkey }: { pubkey: string }) {
-  const author = useAuthor(pubkey);
-  const rawName = author.data?.metadata?.display_name || author.data?.metadata?.name || '';
-  const name = rawName.trim() || 'Someone';
-  return <span>{name} reposted</span>;
-}
 
-function ApprovalLabel({ pubkey }: { pubkey: string }) {
-  const author = useAuthor(pubkey);
-  const rawName = author.data?.metadata?.display_name || author.data?.metadata?.name || '';
-  const name = rawName.trim() || 'A moderator';
-  return <span>{name} approved a post</span>;
-}

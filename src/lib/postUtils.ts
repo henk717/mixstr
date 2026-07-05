@@ -273,6 +273,19 @@ export function isCommunityApproval(event: NostrEvent): boolean {
 }
 
 /**
+ * Get the referenced event id from a wrapper event's `e` tag.
+ * Used for empty-content reposts (NIP-18) and community approvals that do not
+ * embed the original event JSON.
+ */
+export function getRepostedEventRef(event: NostrEvent): { id: string; relay?: string; author?: string } | null {
+  if (!isRepost(event) && !isCommunityApproval(event)) return null;
+  const eTags = event.tags.filter(([t]) => t === 'e');
+  if (eTags.length === 0) return null;
+  const last = eTags[eTags.length - 1];
+  return { id: last[1], relay: last[2] || undefined, author: last[3] || undefined };
+}
+
+/**
  * Try to extract an embedded event from wrapper kinds whose content is a
  * JSON-encoded Nostr event (reposts: kind 6/16, community approvals: kind 4550).
  * Returns null if the event is not a wrapper or its content is not valid.

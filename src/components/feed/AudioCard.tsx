@@ -4,17 +4,18 @@ import { Play, Plus, Music, Video, CheckCircle, Rss } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
+import { RepostBanner } from './RepostBanner';
 import {
   getEventTitle,
   getCoverImage,
   relativeTime,
   getAudioTrackInfo,
   eventToNevent,
-  tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useMixstr } from '@/hooks/useMixstr';
 import { useVideoThumbnail } from '@/hooks/useVideoThumbnail';
+import { useResolvedEvent } from '@/hooks/useResolvedEvent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -29,8 +30,8 @@ interface AudioCardProps {
 export function AudioCard({ event, moderation }: AudioCardProps) {
   const navigate = useNavigate();
 
-  // Reposts and community approvals wrap the real post as JSON in content.
-  const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
+  // Resolve repost/community-approval wrappers to the original event.
+  const { event: displayEvent, wrapper } = useResolvedEvent(event);
 
   const isRss = isRssSyntheticEvent(displayEvent);
   const author = useAuthor(isRss ? undefined : displayEvent.pubkey);
@@ -87,11 +88,17 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
 
   return (
     <div
-      className="flex items-center gap-4 px-4 py-3 border-b border-border hover:bg-accent/30 transition-colors cursor-pointer group"
+      className="border-b border-border hover:bg-accent/30 transition-colors cursor-pointer group"
       onClick={handleRowClick}
     >
-      {/* Album art / video thumbnail with play overlay */}
-      <div className="relative w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-muted">
+      {/* ── Repost / community approval banner ── */}
+      {wrapper && (
+        <RepostBanner wrapper={wrapper} className="px-4 pt-2 pb-0" />
+      )}
+
+      <div className="flex items-center gap-4 px-4 py-3">
+        {/* Album art / video thumbnail with play overlay */}
+        <div className="relative w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-muted">
         {artwork ? (
           <img
             src={artwork}
@@ -173,6 +180,7 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
         >
           <Plus size={16} />
         </Button>
+      </div>
       </div>
     </div>
   );

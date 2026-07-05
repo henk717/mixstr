@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
+import { ChevronDown, ChevronUp, ArrowRight, CheckCircle } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { Lightbox } from '@/components/ImageGallery';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ import { RssOpenRow } from './RssOpenRow';
 import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
 import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
+import { RepostBanner } from './RepostBanner';
 import {
   extractImages,
   extractVideos,
@@ -23,16 +24,15 @@ import {
   eventToNevent,
   getParentEventId,
   hasMedia as eventHasMedia,
-  tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useTopComments } from '@/hooks/useEventComments';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useParentEvent } from '@/hooks/useParentEvent';
+import { useResolvedEvent } from '@/hooks/useResolvedEvent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { CheckCircle } from 'lucide-react';
 
 interface LongPostCardProps {
   event: NostrEvent;
@@ -62,9 +62,8 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const [coverLightboxOpen, setCoverLightboxOpen] = useState(false);
   const navigate = useNavigate();
 
-  // Reposts and community approvals wrap the real post as JSON in content.
-  const embeddedEvent = tryExtractEmbeddedEvent(event);
-  const displayEvent = embeddedEvent ?? event;
+  // Resolve repost/community-approval wrappers to the original event.
+  const { event: displayEvent, wrapper } = useResolvedEvent(event);
   const nevent = eventToNevent(displayEvent);
 
   const reply = isReply(displayEvent);
@@ -102,6 +101,11 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
       )}
       onClick={handleCardClick}
     >
+      {/* ── Repost / community approval banner ── */}
+      {wrapper && (
+        <RepostBanner wrapper={wrapper} className="px-4 pt-3 pb-0" />
+      )}
+
       {/* ── Parent context (long view shows full parent preview above the reply) ── */}
       {reply && parentEvent && (
         <ReplyParentPreview
