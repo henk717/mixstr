@@ -10,6 +10,8 @@ import { useFollowMutation } from '@/hooks/useFollowMutation';
 import { useNip05Verification } from '@/hooks/useNip05Verification';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useProfileUrl } from '@/hooks/useProfileUrl';
+import { useBlockUser } from '@/hooks/useBlockUser';
+import { useReportUser, REPORT_TYPES, type ReportType } from '@/hooks/useReportUser';
 import { FeedView } from '@/components/feed/FeedView';
 import { ViewModeSwitcher } from '@/components/feed/ViewModeSwitcher';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -22,11 +24,30 @@ import { NoteContent } from '@/components/NoteContent';
 import { Lightbox } from '@/components/ImageGallery';
 import { Link } from 'react-router-dom';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { useToast } from '@/hooks/useToast';
+import {
   Globe,
   Zap,
   BadgeCheck,
   UserPlus,
   UserCheck,
+  Shield,
+  Flag,
 } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
@@ -152,13 +173,20 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
   const { user } = useCurrentUser();
   const { data: followingList = [] } = useFollowing();
   const followMutation = useFollowMutation();
+  const blockMutation = useBlockUser();
+  const reportMutation = useReportUser();
+  const { toast } = useToast();
   const isFollowing = followingList.includes(pubkey);
   const isOwnProfile = user?.pubkey === pubkey;
+  const isBlocked = user ? blockMutation.isSuccess || false : false;
 
   const { data: isVerified } = useNip05Verification(meta?.nip05, pubkey);
 
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
   const [avatarLightboxOpen, setAvatarLightboxOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportType, setReportType] = useState<ReportType>('spam');
+  const [reportReason, setReportReason] = useState('');
 
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || pubkey.slice(0, 16) + '…';
@@ -216,6 +244,36 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
     followMutation.mutate({ pubkey, action: isFollowing ? 'unfollow' : 'follow' });
   };
 
+  const handleBlock = () => {
+    if (!user) return;
+    blockMutation.mutate(pubkey, {
+      onSuccess: () => {
+        toast({ title: 'Blocked', description: `${displayName} has been added to your block list.` });
+      },
+      onError: (err) => {
+        toast({ title: 'Block failed', description: String(err), variant: 'destructive' });
+      },
+    });
+  };
+
+  const handleReport = () => {
+    if (!user) return;
+    reportMutation.mutate(
+      { pubkey, type: reportType, reason: reportReason },
+      {
+        onSuccess: () => {
+          toast({ title: 'Report submitted', description: 'Thanks for helping keep the network clean.' });
+          setReportOpen(false);
+          setReportReason('');
+          setReportType('spam');
+        },
+        onError: (err) => {
+          toast({ title: 'Report failed', description: String(err), variant: 'destructive' });
+        },
+      },
+    );
+  };
+
   // "Posts only" = exclude events that are replies to other users' posts.
   // A reply is any kind-1 event that has an 'e' tag referencing another post.
   // Other kinds (reposts, longform, etc.) are kept regardless.
@@ -269,27 +327,51 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           )}
 
           {!isOwnProfile && user && (
-            <Button
-              variant={isFollowing ? 'outline' : 'default'}
-              size="sm"
-              className="mb-1 gap-1.5"
-              onClick={handleFollowToggle}
-              disabled={followMutation.isPending}
-            >
-              {followMutation.isPending ? (
-                <span className="animate-pulse">…</span>
-              ) : isFollowing ? (
-                <>
-                  <UserCheck size={14} />
-                  Following
-                </>
-              ) : (
-                <>
-                  <UserPlus size={14} />
-                  Follow
-                </>
-              )}
-            </Button>
+            <div className="flex items-center gap-2 mb-1">
+              <Button
+                variant={isFollowing ? 'outline' : 'default'}
+                size="sm"
+                className="gap-1.5"
+                onClick={handleFollowToggle}
+                disabled={followMutation.isPending}
+              >
+                {followMutation.isPending ? (
+                  <span className="animate-pulse">…</span>
+                ) : isFollowing ? (
+                  <>
+                    <UserCheck size={14} />
+                    Following
+                  </>
+                ) : (
+                  <>
+                    <UserPlus size={14} />
+                    Follow
+                  </>
+                )}
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={handleBlock}
+                disabled={blockMutation.isPending}
+              >
+                <Shield size={14} />
+                {blockMutation.isPending ? 'Blocking…' : 'Block'}
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setReportOpen(true)}
+                disabled={reportMutation.isPending}
+              >
+                <Flag size={14} />
+                Report
+              </Button>
+            </div>
           )}
         </div>
       </div>
@@ -457,6 +539,59 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           </p>
         </div>
       )}
+
+      {/* Report dialog */}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Report {displayName}</DialogTitle>
+            <DialogDescription>
+              Submit a NIP-56 report event. This is public and helps clients filter bad actors.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Reason</label>
+              <Select value={reportType} onValueChange={(v) => setReportType(v as ReportType)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REPORT_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type[0].toUpperCase() + type.slice(1)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Details (optional)</label>
+              <Textarea
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                placeholder="Why are you reporting this account?"
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReportOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleReport}
+              disabled={reportMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {reportMutation.isPending ? 'Submitting…' : 'Submit Report'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
