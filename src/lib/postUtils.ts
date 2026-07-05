@@ -229,6 +229,35 @@ export function isReply(event: NostrEvent): boolean {
   return event.tags.some(([t]) => t === 'e');
 }
 
+/**
+ * Get the direct parent event reference for a reply, following NIP-10 conventions.
+ *
+ * Priority order:
+ *  1. `e` tag with marker "reply"  → direct parent
+ *  2. `e` tag with marker "root"   → root of thread (only if no "reply" marker)
+ *  3. Last `e` tag                 → legacy positional encoding
+ */
+export function getParentEventId(event: NostrEvent): { id: string; relay?: string; author?: string } | null {
+  const eTags = event.tags.filter(([t]) => t === 'e');
+  if (eTags.length === 0) return null;
+
+  // Direct reply marker takes priority
+  const replyTag = eTags.find(([, , , marker]) => marker === 'reply');
+  if (replyTag) {
+    return { id: replyTag[1], relay: replyTag[2] || undefined, author: replyTag[3] || undefined };
+  }
+
+  // Single e-tag with no markers → that is the parent
+  if (eTags.length === 1) {
+    const [, id, relay] = eTags[0];
+    return { id, relay: relay || undefined };
+  }
+
+  // Multiple e-tags but no "reply" marker: use last one (legacy positional — last = direct parent)
+  const last = eTags[eTags.length - 1];
+  return { id: last[1], relay: last[2] || undefined };
+}
+
 /** Check if event is a repost (kind 6) */
 export function isRepost(event: NostrEvent): boolean {
   return event.kind === 6;
