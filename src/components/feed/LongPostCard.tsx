@@ -1,16 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { ChevronDown, ChevronUp, MessageCircle, ArrowRight } from 'lucide-react';
-import { nip19 } from 'nostr-tools';
+import { ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
-import { NoteContent } from './NoteContent';
+import { NoteContent } from '@/components/NoteContent';
 import {
-  extractImages,
-  extractVideos,
-  extractExternalEmbeds,
   getEventTitle,
   getCoverImage,
   getSummary,
@@ -27,26 +23,16 @@ interface LongPostCardProps {
   event: NostrEvent;
 }
 
-const TRUNCATE_LENGTH = 800;
-
 export function LongPostCard({ event }: LongPostCardProps) {
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
   const nevent = eventToNevent(event);
 
-  const isVeryLong = event.content.length > TRUNCATE_LENGTH;
-  const images = extractImages(event);
-  const videos = extractVideos(event);
-  const embeds = extractExternalEmbeds(event);
   const reply = isReply(event);
   const longform = isLongform(event);
   const title = getEventTitle(event);
   const cover = getCoverImage(event);
   const summary = getSummary(event);
-
-  const displayContent = isVeryLong && !expanded
-    ? event.content.slice(0, TRUNCATE_LENGTH)
-    : event.content;
 
   const handleCardClick = () => {
     navigate(`/${nevent}`);
@@ -82,8 +68,12 @@ export function LongPostCard({ event }: LongPostCardProps) {
               {summary && (
                 <p className="text-sm text-muted-foreground mb-2">{summary}</p>
               )}
-              <NoteContent content={displayContent} />
-              {isVeryLong && !expanded && (
+              <NoteContent
+                event={event}
+                className={cn('text-sm leading-relaxed', !expanded && 'line-clamp-6')}
+                disableNoteEmbeds={!expanded}
+              />
+              {!expanded && (
                 <button
                   className="text-xs text-primary mt-2 flex items-center gap-1 hover:underline"
                   onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
@@ -91,13 +81,25 @@ export function LongPostCard({ event }: LongPostCardProps) {
                   <ChevronDown size={14} /> Read more
                 </button>
               )}
+              {expanded && (
+                <button
+                  className="text-xs text-muted-foreground mt-2 flex items-center gap-1 hover:underline"
+                  onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+                >
+                  <ChevronUp size={14} /> Show less
+                </button>
+              )}
             </div>
           </div>
         ) : (
           <>
-            <NoteContent content={displayContent} />
+            <NoteContent
+              event={event}
+              className={cn('text-sm leading-relaxed', !expanded && 'line-clamp-8')}
+              disableNoteEmbeds={!expanded}
+            />
 
-            {isVeryLong && !expanded && (
+            {!expanded && (
               <button
                 className="text-xs text-primary flex items-center gap-1 hover:underline"
                 onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
@@ -105,7 +107,7 @@ export function LongPostCard({ event }: LongPostCardProps) {
                 <ChevronDown size={14} /> Show more
               </button>
             )}
-            {isVeryLong && expanded && (
+            {expanded && (
               <button
                 className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
                 onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
@@ -113,37 +115,6 @@ export function LongPostCard({ event }: LongPostCardProps) {
                 <ChevronUp size={14} /> Show less
               </button>
             )}
-
-            {images.length > 0 && (
-              <div className={cn('grid gap-1 rounded-xl overflow-hidden', images.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
-                {images.slice(0, 4).map((url, i) => (
-                  <img key={i} src={url} alt="" className="w-full object-cover aspect-video" loading="lazy"
-                    onClick={(e) => e.stopPropagation()} />
-                ))}
-              </div>
-            )}
-
-            {videos.length > 0 && (
-              <div className="rounded-xl overflow-hidden">
-                <video src={videos[0]} controls className="w-full max-h-96 object-contain bg-black"
-                  onClick={(e) => e.stopPropagation()} />
-              </div>
-            )}
-
-            {/* External embeds (YouTube, Spotify, etc.) */}
-            {embeds.slice(0, 1).map((embed) => (
-              <div key={embed.url} className="rounded-xl overflow-hidden border border-border aspect-video"
-                onClick={(e) => e.stopPropagation()}>
-                <iframe
-                  src={embed.embedUrl}
-                  className="w-full h-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  loading="lazy"
-                  title={embed.label}
-                />
-              </div>
-            ))}
           </>
         )}
       </div>
@@ -151,8 +122,8 @@ export function LongPostCard({ event }: LongPostCardProps) {
       {/* Top 3 comments preview */}
       <CommentPreview eventId={event.id} nevent={nevent} />
 
-      <div className="mt-3">
-        <PostActions eventId={event.id} />
+      <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+        <PostActions event={event} />
       </div>
     </article>
   );

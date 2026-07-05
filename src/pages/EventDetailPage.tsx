@@ -7,17 +7,13 @@ import { useQuery } from '@tanstack/react-query';
 import { nip19 } from 'nostr-tools';
 import { PostAuthor } from '@/components/feed/PostAuthor';
 import { PostActions } from '@/components/feed/PostActions';
-import { NoteContent } from '@/components/feed/NoteContent';
+import { NoteContent } from '@/components/NoteContent';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthor } from '@/hooks/useAuthor';
-import { useTopComments } from '@/hooks/useEventComments';
 import {
-  extractImages,
-  extractVideos,
-  extractExternalEmbeds,
   getEventTitle,
   getCoverImage,
   getSummary,
@@ -95,9 +91,6 @@ function BackButton() {
 }
 
 function EventDetailBody({ event }: { event: NostrEvent }) {
-  const images = extractImages(event);
-  const videos = extractVideos(event);
-  const embeds = extractExternalEmbeds(event);
   const longform = isLongform(event);
   const title = getEventTitle(event);
   const cover = getCoverImage(event);
@@ -118,38 +111,11 @@ function EventDetailBody({ event }: { event: NostrEvent }) {
               {title && <h1 className="text-xl font-bold text-foreground leading-snug">{title}</h1>}
               {summary && <p className="text-sm text-muted-foreground italic">{summary}</p>}
               <div className="prose prose-invert prose-sm max-w-none">
-                <NoteContent content={event.content} />
+                <NoteContent event={event} />
               </div>
             </>
           ) : (
-            <>
-              <NoteContent content={event.content} />
-
-              {images.length > 0 && (
-                <div className={images.length > 1 ? 'grid grid-cols-2 gap-1 rounded-xl overflow-hidden' : ''}>
-                  {images.map((url, i) => (
-                    <img key={i} src={url} alt="" className="w-full object-cover rounded-xl" loading="lazy" />
-                  ))}
-                </div>
-              )}
-
-              {videos.length > 0 && (
-                <video src={videos[0]} controls className="w-full rounded-xl bg-black" />
-              )}
-
-              {embeds.map((embed) => (
-                <div key={embed.url} className="rounded-xl overflow-hidden border border-border aspect-video">
-                  <iframe
-                    src={embed.embedUrl}
-                    className="w-full h-full"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    loading="lazy"
-                    title={embed.label}
-                  />
-                </div>
-              ))}
-            </>
+            <NoteContent event={event} className="text-sm leading-relaxed" />
           )}
         </div>
 
@@ -159,7 +125,7 @@ function EventDetailBody({ event }: { event: NostrEvent }) {
         </p>
 
         <div className="mt-3 pt-3 border-t border-border">
-          <PostActions eventId={event.id} />
+          <PostActions event={event} />
         </div>
       </div>
 
@@ -243,10 +209,10 @@ function ReplyItem({ reply }: { reply: NostrEvent }) {
           <span className="text-xs text-muted-foreground">{relativeTime(reply.created_at)}</span>
         </div>
         <div className="mt-1">
-          <NoteContent content={reply.content} />
+          <NoteContent event={reply} className="text-sm" />
         </div>
         <div className="mt-2">
-          <PostActions eventId={reply.id} compact />
+          <PostActions event={reply} compact />
         </div>
       </div>
     </div>
