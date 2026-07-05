@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
+import { useAppContext } from '@/hooks/useAppContext';
 
 const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
 const PAGE_SIZE = 30;
@@ -11,23 +12,31 @@ const PAGE_SIZE = 30;
 const NEWER_POLL_INTERVAL = 12_000;   // 12 s — check for brand-new posts
 const OLDER_POLL_INTERVAL = 20_000;   // 20 s — keep fetching the next history page
 
+interface FetchWindow {
+  oldest: number | undefined;
+  newest: number | undefined;
+}
+
 /**
  * useProfileFeed
  *
  * Persistently fetches a profile's events while mounted.
  *
  * Strategy:
- *  – Initial load: fetch `limit` events ending now.
+ *  – Query every configured read relay individually and asynchronously so one
+ *    slow or stale relay never suppresses events that only exist on another.
+ *  – Initial load: fetch `limit` events ending now from each relay, merge unique IDs.
  *  – "Newer" poll (NEWER_POLL_INTERVAL): fetch events since the latest we have.
  *    Prepends new items to the accumulated list.
  *  – "Older" crawl (OLDER_POLL_INTERVAL): advance the cursor and fetch the next
- *    page back in history.  Stops when a page comes back empty.
+ *    page back in history.  Stops when every relay has returned an empty page.
  *  – Manual `fetchNextPage`: user-triggered fetch of the next older page.
  *
  * Events are de-duplicated by ID and sorted newest-first.
  */
 export function useProfileFeed(pubkey: string) {
   const { nostr } = useNostr();
+  const { config } = useAppContext();
 
   // Accumulated de-duplicated events, sorted newest-first
   const [events, setEvents] = useState<NostrEvent[]>([]);
@@ -35,15 +44,19 @@ export function useProfileFeed(pubkey: string) {
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
-  // oldest created_at we've successfully loaded (pagination cursor)
+  // oldest/newest created_at we've successfully loaded
   const oldestRef = useRef<number | undefined>(undefined);
-  // newest created_at we've successfully loaded (for "newer" polling)
   const newestRef = useRef<number | undefined>(undefined);
   // set of event IDs we already have
   const seenIdsRef = useRef<Set<string>>(new Set());
   // guard against concurrent fetches in the same direction
   const fetchingOlderRef = useRef(false);
   const fetchingNewerRef = useRef(false);
+
+  /** Read-relay URLs from the user's NIP-65 list */
+  const readRelays = config.relayMetadata.relays
+    .filter((r) => r.read)
+    .map((r) => r.url);
 
   /** Merge new events into state, deduplicated and sorted */
   const mergeEvents = useCallback((incoming: NostrEvent[]) => {
@@ -69,6 +82,50 @@ export function useProfileFeed(pubkey: string) {
     });
   }, []);
 
+  /**
+   * Query each configured read relay independently, then merge unique results.
+   * Use the per-relay query timeout so a single stalled relay doesn't hold up
+   * events from others.
+   */
+  const queryAllReadRelays = useCallback(async (
+    makeFilter: (window: FetchWindow) => { kinds: number[]; authors: string[]; limit: number; until?: number; since?: number },
+    timeoutMs: number,
+  ): Promise<NostrEvent[]> => {
+    if (readRelays.length === 0) {
+      return nostr.query([{ kinds: KINDS, authors: [pubkey], limit: PAGE_SIZE }], { signal: AbortSignal.timeout(timeoutMs) });
+    }
+
+    const window: FetchWindow = {
+      oldest: oldestRef.current,
+      newest: newestRef.current,
+    };
+    const filter = makeFilter(window);
+
+    const relays = await Promise.allSettled(
+      readRelays.map(async (url) => {
+        try {
+          const relay = nostr.relay(url);
+          return await relay.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+        } catch {
+          return [];
+        }
+      }),
+    );
+
+    const seen = new Set<string>();
+    const all: NostrEvent[] = [];
+    for (const result of relays) {
+      if (result.status !== 'fulfilled') continue;
+      for (const ev of result.value) {
+        if (!seen.has(ev.id)) {
+          seen.add(ev.id);
+          all.push(ev);
+        }
+      }
+    }
+    return all;
+  }, [nostr, pubkey, readRelays]);
+
   /** Fetch events older than the current cursor */
   const fetchOlder = useCallback(async () => {
     if (fetchingOlderRef.current || !hasMore) return;
@@ -76,17 +133,17 @@ export function useProfileFeed(pubkey: string) {
     setIsFetchingOlder(true);
 
     try {
-      const until = oldestRef.current !== undefined ? oldestRef.current - 1 : undefined;
-      const filter: Record<string, unknown> = {
-        kinds: KINDS,
-        authors: [pubkey],
-        limit: PAGE_SIZE,
-      };
-      if (until !== undefined) filter.until = until;
-
-      const fetched = await nostr.query(
-        [filter as Parameters<typeof nostr.query>[0][0]],
-        { signal: AbortSignal.timeout(10_000) },
+      const fetched = await queryAllReadRelays(
+        (window) => {
+          const until = window.oldest !== undefined ? window.oldest - 1 : undefined;
+          return {
+            kinds: KINDS,
+            authors: [pubkey],
+            limit: PAGE_SIZE,
+            ...(until !== undefined && { until }),
+          };
+        },
+        10_000,
       );
 
       if (fetched.length === 0) {
@@ -94,7 +151,8 @@ export function useProfileFeed(pubkey: string) {
       } else {
         mergeEvents(fetched);
         if (fetched.length < PAGE_SIZE) {
-          setHasMore(false);
+          // Per convention a relay is unlikely to have more if it returned fewer
+          // than requested, but keep polling in case straggler relays arrive later.
         }
       }
     } catch {
@@ -103,7 +161,7 @@ export function useProfileFeed(pubkey: string) {
       fetchingOlderRef.current = false;
       setIsFetchingOlder(false);
     }
-  }, [pubkey, nostr, hasMore, mergeEvents]);
+  }, [pubkey, hasMore, mergeEvents, queryAllReadRelays]);
 
   /** Fetch events newer than the newest we have */
   const fetchNewer = useCallback(async () => {
@@ -111,17 +169,17 @@ export function useProfileFeed(pubkey: string) {
     fetchingNewerRef.current = true;
 
     try {
-      const since = newestRef.current !== undefined ? newestRef.current + 1 : undefined;
-      const filter: Record<string, unknown> = {
-        kinds: KINDS,
-        authors: [pubkey],
-        limit: PAGE_SIZE,
-      };
-      if (since !== undefined) filter.since = since;
-
-      const fetched = await nostr.query(
-        [filter as Parameters<typeof nostr.query>[0][0]],
-        { signal: AbortSignal.timeout(8_000) },
+      const fetched = await queryAllReadRelays(
+        (window) => {
+          const since = window.newest !== undefined ? window.newest + 1 : undefined;
+          return {
+            kinds: KINDS,
+            authors: [pubkey],
+            limit: PAGE_SIZE,
+            ...(since !== undefined && { since }),
+          };
+        },
+        8_000,
       );
 
       if (fetched.length > 0) mergeEvents(fetched);
@@ -130,7 +188,7 @@ export function useProfileFeed(pubkey: string) {
     } finally {
       fetchingNewerRef.current = false;
     }
-  }, [pubkey, nostr, mergeEvents]);
+  }, [pubkey, mergeEvents, queryAllReadRelays]);
 
   // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -149,9 +207,9 @@ export function useProfileFeed(pubkey: string) {
 
     const load = async () => {
       try {
-        const fetched = await nostr.query(
-          [{ kinds: KINDS, authors: [pubkey], limit: PAGE_SIZE }],
-          { signal: AbortSignal.timeout(10_000) },
+        const fetched = await queryAllReadRelays(
+          () => ({ kinds: KINDS, authors: [pubkey], limit: PAGE_SIZE }),
+          10_000,
         );
         if (!cancelled) {
           mergeEvents(fetched);
