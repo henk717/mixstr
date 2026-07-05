@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Plus, GripVertical, X, Wifi, Search, Check, Building2, Users } from 'lucide-react';
+import { Plus, GripVertical, X, Wifi, Search, Check, Building2, Users, MessageSquare } from 'lucide-react';
 import { useFollowingProfiles, type FollowingProfile } from '@/hooks/useFollowingProfiles';
 import { useRecentProfiles } from '@/hooks/useRecentProfiles';
 import { profileLabel } from '@/lib/mentions';
@@ -373,10 +373,33 @@ function DvmField({
   onChange: (pk: string) => void;
 }) {
   const { data: dvms = [], isLoading } = useDiscoverDvms();
+  const [filter, setFilter] = useState('');
+
+  const q = filter.trim().toLowerCase();
+  const filteredDvms = useMemo(() => {
+    if (!q) return dvms;
+    return dvms.filter(
+      (dvm) =>
+        dvm.name.toLowerCase().includes(q) ||
+        dvm.about.toLowerCase().includes(q) ||
+        dvm.pubkey.toLowerCase().includes(q),
+    );
+  }, [dvms, q]);
 
   return (
     <div className="space-y-2">
       <Label className="text-xs text-muted-foreground">DVM provider</Label>
+
+      {/* Filter */}
+      <div className="relative">
+        <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter DVMs…"
+          className="h-7 text-xs bg-background pl-6"
+        />
+      </div>
 
       {/* Discovered DVMs from network */}
       <div className="space-y-1.5">
@@ -384,43 +407,45 @@ function DvmField({
           {isLoading ? (
             <><Loader2 size={10} className="animate-spin" /> Discovering DVMs…</>
           ) : (
-            `${dvms.length} DVM${dvms.length !== 1 ? 's' : ''} found on network`
+            `${filteredDvms.length} DVM${filteredDvms.length !== 1 ? 's' : ''} found`
           )}
         </p>
 
-        {!isLoading && dvms.length === 0 && (
+        {!isLoading && filteredDvms.length === 0 && (
           <p className="text-xs text-muted-foreground italic">
-            No DVMs advertising kind 5300 support found. Enter one manually below.
+            {q ? 'No DVMs match your filter.' : 'No DVMs advertising kind 5300 support found. Enter one manually below.'}
           </p>
         )}
 
-        {dvms.map((dvm) => {
-          const isSelected = dvmPubkey === dvm.pubkey;
-          return (
-            <button
-              key={dvm.pubkey}
-              onClick={() => onChange(dvm.pubkey)}
-              className={cn(
-                'w-full flex items-center gap-2.5 text-left px-2.5 py-2 rounded-lg border text-xs transition-colors',
-                isSelected
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-background hover:bg-accent',
-              )}
-            >
-              <Avatar className="w-8 h-8 flex-shrink-0">
-                <AvatarImage src={dvm.picture} />
-                <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-bold">
-                  {dvm.name[0]?.toUpperCase() ?? 'D'}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold truncate">{dvm.name}</p>
-                <p className="text-muted-foreground text-[11px] truncate">{dvm.about}</p>
-              </div>
-              {isSelected && <Check size={13} className="flex-shrink-0" />}
-            </button>
-          );
-        })}
+        <div className="max-h-40 overflow-y-auto space-y-1.5 pr-0.5">
+          {filteredDvms.map((dvm) => {
+            const isSelected = dvmPubkey === dvm.pubkey;
+            return (
+              <button
+                key={dvm.pubkey}
+                onClick={() => onChange(dvm.pubkey)}
+                className={cn(
+                  'w-full flex items-center gap-2.5 text-left px-2.5 py-2 rounded-lg border text-xs transition-colors',
+                  isSelected
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-background hover:bg-accent',
+                )}
+              >
+                <Avatar className="w-8 h-8 flex-shrink-0">
+                  <AvatarImage src={dvm.picture} />
+                  <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-bold">
+                    {dvm.name[0]?.toUpperCase() ?? 'D'}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold truncate">{dvm.name}</p>
+                  <p className="text-muted-foreground text-[11px] truncate">{dvm.about}</p>
+                </div>
+                {isSelected && <Check size={13} className="flex-shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Manual npub entry */}
@@ -454,10 +479,22 @@ function CommunityField({
   const { user } = useCurrentUser();
   const { mutateAsync: publish, isPending: isCreating } = useNostrPublish();
   const [showCreate, setShowCreate] = useState(false);
+  const [filter, setFilter] = useState('');
   const [name, setName] = useState('');
   const [identifier, setIdentifier] = useState('');
   const [description, setDescription] = useState('');
   const [image, setImage] = useState('');
+
+  const q = filter.trim().toLowerCase();
+  const filteredCommunities = useMemo(() => {
+    if (!q) return communities;
+    return communities.filter(
+      (community) =>
+        community.name.toLowerCase().includes(q) ||
+        (community.description?.toLowerCase().includes(q) ?? false) ||
+        community.address.toLowerCase().includes(q),
+    );
+  }, [communities, q]);
 
   const selected = parseCommunityInput(source.communityId ?? '');
 
@@ -488,24 +525,37 @@ function CommunityField({
     <div className="space-y-2">
       <Label className="text-xs text-muted-foreground">Community</Label>
 
+      {/* Filter */}
+      <div className="relative">
+        <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter communities…"
+          className="h-7 text-xs bg-background pl-6"
+        />
+      </div>
+
       {/* Discovered communities */}
       <div className="space-y-1.5">
         <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide flex items-center gap-1.5">
           {isLoading ? (
             <><Loader2 size={10} className="animate-spin" /> Discovering communities…</>
           ) : (
-            `${communities.length} community${communities.length !== 1 ? 'ies' : 'y'} found`
+            `${filteredCommunities.length} community${filteredCommunities.length !== 1 ? 'ies' : 'y'} found`
           )}
         </p>
 
-        {!isLoading && communities.length === 0 && (
+        {!isLoading && filteredCommunities.length === 0 && (
           <p className="text-xs text-muted-foreground italic">
-            No communities discovered yet. You can create one below or paste a community address manually.
+            {q
+              ? 'No communities match your filter.'
+              : 'No communities discovered yet. You can create one below or paste a community address manually.'}
           </p>
         )}
 
         <div className="max-h-40 overflow-y-auto space-y-1.5 pr-0.5">
-          {communities.map((community) => {
+          {filteredCommunities.map((community) => {
             const isSelected = selected?.address === community.address;
             return (
               <button
@@ -529,9 +579,15 @@ function CommunityField({
                   {community.description && (
                     <p className="text-muted-foreground text-[11px] truncate">{community.description}</p>
                   )}
-                  <p className="text-[10px] text-muted-foreground/70 flex items-center gap-1 mt-0.5">
-                    <Users size={10} />
-                    {community.moderators.length} moderator{community.moderators.length !== 1 ? 's' : ''}
+                  <p className="text-[10px] text-muted-foreground/70 flex items-center gap-2 mt-0.5">
+                    <span className="flex items-center gap-1">
+                      <MessageSquare size={10} />
+                      {community.postCount} post{community.postCount !== 1 ? 's' : ''}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Users size={10} />
+                      {community.moderators.length} moderator{community.moderators.length !== 1 ? 's' : ''}
+                    </span>
                   </p>
                 </div>
                 {isSelected && <Check size={13} className="flex-shrink-0" />}
@@ -1007,22 +1063,29 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
                 <div className="flex items-center justify-between">
                   <Label className="text-xs text-muted-foreground">Max duration</Label>
                   <span className="text-xs text-muted-foreground">
-                    {viewOptions.mediaMaxDurationSec
-                      ? formatDuration(viewOptions.mediaMaxDurationSec)
-                      : 'No limit'}
+                    {viewOptions.mediaMaxDurationSec === undefined
+                      ? 'No limit'
+                      : viewOptions.mediaMaxDurationSec === 0
+                        ? '0s'
+                        : formatDuration(viewOptions.mediaMaxDurationSec)}
                   </span>
                 </div>
                 <Slider
                   min={0}
                   max={7200}
                   step={30}
-                  value={[viewOptions.mediaMaxDurationSec ?? 0]}
-                  onValueChange={([v]) => setViewOptions((prev) => ({ ...prev, mediaMaxDurationSec: v || undefined }))}
+                  value={[viewOptions.mediaMaxDurationSec ?? 7200]}
+                  onValueChange={([v]) =>
+                    setViewOptions((prev) => ({
+                      ...prev,
+                      mediaMaxDurationSec: v >= 7200 ? undefined : v,
+                    }))
+                  }
                   className="w-full"
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Only shows videos within this range in the media tab. 0 = no limit.
+                Only shows videos within this range in the media tab. Max duration all the way to the right means no limit; any value up to 2 hours is used as the cap.
               </p>
             </div>
           </div>
