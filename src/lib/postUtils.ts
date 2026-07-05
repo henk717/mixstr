@@ -427,15 +427,32 @@ export function getMediaDuration(event: NostrEvent): number | undefined {
 }
 
 /** Encode an event to a nevent nip19 identifier for navigation */
-export function eventToNevent(event: NostrEvent): string {
+export function eventToNevent(event: NostrEvent, relays?: string[]): string {
   try {
     const { nip19 } = require('nostr-tools') as typeof import('nostr-tools');
     return nip19.neventEncode({
       id: event.id,
       author: event.pubkey,
       kind: event.kind,
+      ...(relays?.length ? { relays } : {}),
     });
   } catch {
     return event.id;
   }
+}
+
+/**
+ * Find a relay hint for a specific event id in another event's tags.
+ * NIP-18 reposts and NIP-22 quote posts include `e` / `q` tags that may
+ * name the relay where the referenced event lives. We can forward that hint
+ * into a nevent identifier so the detail page can load it even if the user's
+ * normal relay pool doesn't have it.
+ */
+export function findRelayHintForEvent(event: NostrEvent, eventId: string): string | undefined {
+  for (const tag of event.tags) {
+    if ((tag[0] === 'e' || tag[0] === 'q') && tag[1] === eventId && tag[2]) {
+      return tag[2];
+    }
+  }
+  return undefined;
 }

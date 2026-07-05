@@ -1,6 +1,7 @@
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
+import { fetchEventWithRelays } from '@/lib/queryEvent';
 
 interface ParentRef {
   id: string;
@@ -11,10 +12,14 @@ interface ParentRef {
 /**
  * Fetch the parent event of a reply.
  *
- * Strategy: first try with the author hint (fast path). If that returns
- * nothing — either because the author hint was wrong or the relay doesn't
- * have it — fall back to a broad id-only query. This handles the common
- * case where the e-tag author hint is missing or incorrect.
+ * Strategy:
+ *  1. Query the pool while also probing the relay hint from the reply's e-tag,
+ *     and include the author hint when available. Directly querying the e-tag
+ *     relay is essential when the parent lives on a relay outside the normal
+ *     pool or is slower than the pool's default EOSE timeout.
+ *  2. If that fails, fall back to a broad id-only pool query. This handles the
+ *     common case where the e-tag author hint was wrong or the relay doesn't
+ *     have the event.
  *
  * Returns undefined while loading, null if not found, or the event.
  */
@@ -22,25 +27,27 @@ export function useParentEvent(parentRef: ParentRef | null) {
   const { nostr } = useNostr();
 
   return useQuery<NostrEvent | null>({
-    queryKey: ['nostr', 'parent-event', parentRef?.id ?? ''],
+    queryKey: ['nostr', 'parent-event', parentRef?.id ?? '', parentRef?.relay ?? '', parentRef?.author ?? ''],
     queryFn: async ({ signal }) => {
       if (!parentRef?.id) return null;
 
       const abort = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
 
-      // First attempt: use author hint if available (narrower, faster)
+      // First attempt: pool + author hint + relay hint from the reply tag.
       if (parentRef.author) {
-        const [ev] = await nostr.query(
+        const ev = await fetchEventWithRelays(
+          nostr,
           [{ ids: [parentRef.id], authors: [parentRef.author], limit: 1 }],
-          { signal: abort },
+          { relayHints: parentRef.relay ? [parentRef.relay] : undefined, timeoutMs: 8000, signal: abort },
         );
         if (ev) return ev;
       }
 
-      // Fallback: broad query without author constraint
-      const [ev] = await nostr.query(
+      // Second attempt: pool + relay hint without author constraint.
+      const ev = await fetchEventWithRelays(
+        nostr,
         [{ ids: [parentRef.id], limit: 1 }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]) },
+        { relayHints: parentRef.relay ? [parentRef.relay] : undefined, timeoutMs: 8000, signal },
       );
       return ev ?? null;
     },

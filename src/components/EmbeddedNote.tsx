@@ -1,10 +1,9 @@
 import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
-import { useNostr } from '@nostrify/react';
-import { useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useEventById } from '@/hooks/useEventById';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { relativeTime, tryExtractEmbeddedEvent } from '@/lib/postUtils';
 
@@ -36,19 +35,13 @@ export function EmbeddedNote({ eventId, relays, authorHint, className, depth = 0
     ...(relays?.length ? { relays } : {}),
   });
 
-  const { data: event, isLoading } = useQuery<NostrEvent | null>({
-    queryKey: ['nostr', 'embedded-note', eventId],
-    queryFn: async ({ signal }) => {
-      const filter = authorHint
-        ? [{ ids: [eventId], authors: [authorHint], limit: 1 }]
-        : [{ ids: [eventId], limit: 1 }];
-      const [ev] = await nostr.query(filter, {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
-      });
-      return ev ?? null;
-    },
-    staleTime: 5 * 60 * 1000,
+  const { data: event, isLoading } = useEventById({
+    eventId,
+    pubkey: authorHint,
+    relayHints: relays,
+    timeoutMs: 6000,
     enabled: depth < MAX_DEPTH,
+    staleTime: 5 * 60 * 1000,
   });
 
   // If we've hit max depth, just render a link

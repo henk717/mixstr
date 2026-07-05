@@ -14,6 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useEventById } from '@/hooks/useEventById';
 import { useParentEvent } from '@/hooks/useParentEvent';
 import {
   getEventTitle,
@@ -26,6 +27,7 @@ import {
   eventToNevent,
   tryExtractEmbeddedEvent,
   isCommunityApproval,
+  findRelayHintForEvent,
 } from '@/lib/postUtils';
 
 interface EventDetailPageProps {
@@ -33,28 +35,17 @@ interface EventDetailPageProps {
   pubkey?: string;
   /** For addressable events — the kind number (used with pubkey + d-tag) */
   kind?: number;
+  /** Relay URLs from the NIP-19 identifier that are known to have this event. */
+  relays?: string[];
 }
 
-export function EventDetailPage({ eventId, pubkey, kind }: EventDetailPageProps) {
-  const { nostr } = useNostr();
-
-  const { data: outerEvent, isLoading } = useQuery<NostrEvent | null>({
-    queryKey: ['nostr', 'event-detail', eventId, pubkey ?? '', kind ?? 0],
-    queryFn: async ({ signal }) => {
-      let filter;
-      if (kind && pubkey) {
-        // Addressable event: query by kind + author + d-tag
-        filter = [{ kinds: [kind], authors: [pubkey], '#d': [eventId], limit: 1 }];
-      } else if (pubkey) {
-        filter = [{ ids: [eventId], authors: [pubkey], limit: 1 }];
-      } else {
-        filter = [{ ids: [eventId], limit: 1 }];
-      }
-      const [ev] = await nostr.query(filter, {
-        signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]),
-      });
-      return ev ?? null;
-    },
+export function EventDetailPage({ eventId, pubkey, kind, relays }: EventDetailPageProps) {
+  const { data: outerEvent, isLoading } = useEventById({
+    eventId,
+    pubkey,
+    kind,
+    relayHints: relays,
+    timeoutMs: 8000,
     staleTime: 5 * 60 * 1000,
   });
 
@@ -120,7 +111,9 @@ function EventDetailBody({ event, wrapper }: { event: NostrEvent; wrapper?: Nost
           {parentEvent ? (
             <ReplyParentPreview
               parent={parentEvent}
-              onParentClick={() => navigate(`/${eventToNevent(parentEvent)}`)}
+              onParentClick={() =>
+                navigate(`/${eventToNevent(parentEvent, parentRef?.relay ? [parentRef.relay] : undefined)}`)
+              }
             />
           ) : (
             <div className="pt-2 pb-0">

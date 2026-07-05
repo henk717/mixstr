@@ -47,6 +47,7 @@ export function NIP19Page() {
           <EventDetailPage
             eventId={decoded.data.id}
             pubkey={decoded.data.author}
+            relays={decoded.data.relays}
           />
         </MainLayout>
       );
@@ -69,6 +70,7 @@ export function NIP19Page() {
             eventId={dTag}
             pubkey={pubkey}
             kind={kind}
+            relays={decoded.data.relays}
           />
         </MainLayout>
       );

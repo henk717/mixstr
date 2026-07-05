@@ -25,6 +25,7 @@ import {
   getParentEventId,
   tryExtractEmbeddedEvent,
   isCommunityApproval,
+  findRelayHintForEvent,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useAuthor } from '@/hooks/useAuthor';
@@ -58,7 +59,8 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   const title = getEventTitle(displayEvent);
   const cover = getCoverImage(displayEvent);
   const summary = getSummary(displayEvent);
-  const nevent = eventToNevent(displayEvent);
+  const relayHint = embeddedEvent ? findRelayHintForEvent(event, embeddedEvent.id) : undefined;
+  const nevent = eventToNevent(displayEvent, relayHint ? [relayHint] : undefined);
   const isRss = isRssSyntheticEvent(displayEvent);
 
   // For replies: fetch the parent event so the compact chip can replace the
