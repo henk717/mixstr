@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { MessageCircle, Repeat2, Zap, Share2, Check } from 'lucide-react';
+import { MessageCircle, Repeat2, Share2, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useNostr } from '@nostrify/react';
 import { useToast } from '@/hooks/useToast';
-import { usePostReactions, formatZapAmount } from '@/hooks/usePostReactions';
+import { usePostReactions } from '@/hooks/usePostReactions';
 import { ReplyDialog } from './ReplyDialog';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -26,7 +26,7 @@ export function PostActions({ event, compact = false }: PostActionsProps) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const { replies, reposts, reactions, zapsMsats, isLoading } = usePostReactions(
+  const { replies, reposts, reactions, isLoading } = usePostReactions(
     event.id,
     user?.pubkey,
   );
@@ -105,15 +105,6 @@ export function PostActions({ event, compact = false }: PostActionsProps) {
     }
   }
 
-  // ── Zap ──────────────────────────────────────────────────────────────
-  async function handleZap(e: React.MouseEvent) {
-    e.stopPropagation();
-    toast({
-      title: 'Zap coming soon',
-      description: 'Lightning zaps require NWC wallet integration — this is on the roadmap!',
-    });
-  }
-
   // ── Share / Copy link ─────────────────────────────────────────────────
   async function handleShare(e: React.MouseEvent) {
     e.stopPropagation();
@@ -138,9 +129,6 @@ export function PostActions({ event, compact = false }: PostActionsProps) {
       // Rebroadcast failure is non-fatal
     }
   }
-
-  const zapSats = Math.floor(zapsMsats / 1000);
-  const zapLabel = formatZapAmount(zapsMsats);
 
   // Determine which emoji to show for the like button
   const likeEmoji = reactions.topEmoji === '👍' || reactions.count === 0 ? null : reactions.topEmoji;
@@ -207,24 +195,6 @@ export function PostActions({ event, compact = false }: PostActionsProps) {
             <span className="tabular-nums">
               {reactions.count >= 1000 ? `${Math.floor(reactions.count / 1000)}k` : reactions.count}
             </span>
-          )}
-        </button>
-
-        {/* Zap */}
-        <button
-          className={cn(btnCls, zapSats > 0 ? 'text-yellow-400' : 'hover:text-yellow-400')}
-          onClick={handleZap}
-          title={zapSats > 0 ? `${zapSats} sats` : 'Zap'}
-          aria-label={`Zap · ${zapLabel || 0}`}
-        >
-          <span className={cn(
-            'p-1.5 rounded-full transition-colors',
-            zapSats > 0 ? 'bg-yellow-400/10' : 'group-hover:bg-yellow-400/10',
-          )}>
-            <Zap size={iconSize} className={zapSats > 0 ? 'fill-yellow-400' : ''} />
-          </span>
-          {!isLoading && zapLabel && (
-            <span className="tabular-nums">{zapLabel}</span>
           )}
         </button>
 
