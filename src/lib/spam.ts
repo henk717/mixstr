@@ -29,7 +29,7 @@ export const DEFAULT_SPAM_SETTINGS: SpamSettings = {
   webOfTrust: { enabled: true, windowDays: 30 },
   hashtag: { enabled: true, maxTags: 5 },
   speed: { enabled: true, maxEvents: 10, windowMinutes: 1 },
-  readability: { enabled: true, minBase64Length: 0 },
+  readability: { enabled: true, minBase64Length: 24 },
 };
 
 const STORAGE_KEY = 'mixstr:spam-settings';
@@ -107,10 +107,19 @@ export function looksLikeJson(content: string): boolean {
 }
 
 export function looksLikeBase64(content: string, minLength: number): boolean {
-  if (minLength > 0 && content.length < minLength) return false;
+  // Never treat very short tokens as base64: English words like "test",
+  // "this", etc. look base64 but are plainly human-readable. Most real
+  // base64 spam is much longer, so enforce a sane floor even when the stored
+  // setting is 0.
+  const effectiveMin = Math.max(minLength, 24);
+  if (content.length < effectiveMin) return false;
   if (/\s/.test(content)) return false;
   if (content.length % 4 !== 0) return false;
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(content)) return false;
+  // For shorter tokens, insist on at least one digit or base64 symbol so we
+  // don't accidentally hide a long dictionary word that happens to be a
+  // multiple of four characters and has no spaces.
+  if (content.length < 48 && !/[^A-Za-z]/.test(content)) return false;
   return true;
 }
 
