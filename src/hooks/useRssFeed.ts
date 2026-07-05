@@ -74,6 +74,16 @@ function parseRss(xml: string, feedUrl: string): RssItem[] {
     doc.querySelector('feed > title')?.textContent?.trim() ||
     feedUrl;
 
+  // Channel/feed-level artwork is used as a fallback for items without their own image.
+  const itunesNs = 'http://www.itunes.com/dtds/podcast-1.0.dtd';
+  const channelEl = doc.querySelector('channel');
+  const feedImage =
+    channelEl?.querySelector('image > url')?.textContent?.trim() ||
+    channelEl?.getElementsByTagNameNS(itunesNs, 'image')[0]?.getAttribute('href') ||
+    doc.querySelector('feed > logo')?.textContent?.trim() ||
+    doc.querySelector('feed > icon')?.textContent?.trim() ||
+    '';
+
   const items = isAtom
     ? Array.from(doc.querySelectorAll('feed > entry'))
     : Array.from(doc.querySelectorAll('channel > item'));
@@ -126,7 +136,6 @@ function parseRss(xml: string, feedUrl: string): RssItem[] {
     // Image: try <media:thumbnail>, <media:content>, <enclosure type="image/*">, itunes:image, og-style
     let image: string | undefined;
     const mediaNs = 'http://search.yahoo.com/mrss/';
-    const itunesNs = 'http://www.itunes.com/dtds/podcast-1.0.dtd';
     const mediaThumbnail =
       item.getElementsByTagNameNS(mediaNs, 'thumbnail')[0]?.getAttribute('url') ||
       item.querySelector('enclosure[type^="image/"]')?.getAttribute('url') || undefined;
@@ -147,6 +156,11 @@ function parseRss(xml: string, feedUrl: string): RssItem[] {
     if (!image && rawDesc.includes('<img')) {
       const m = rawDesc.match(/<img[^>]+src=["']([^"']+)["']/i);
       if (m) image = m[1];
+    }
+
+    // Last resort: use the podcast/feed-level cover art for episodes without one.
+    if (!image) {
+      image = feedImage || undefined;
     }
 
     // Direct media enclosure (audio/video). Prefer explicit audio/video enclosure.

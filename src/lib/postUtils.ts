@@ -3,12 +3,20 @@ import type { NostrEvent } from '@nostrify/nostrify';
 /** Extract image URLs from event content and tags */
 export function extractImages(event: NostrEvent): string[] {
   const urls: string[] = [];
+  const imageExt = /\.(?:jpg|jpeg|png|gif|webp|avif)(?:[?#]\S*)?$/i;
 
-  // From imeta tags (NIP-94)
+  // From imeta tags (NIP-94) — respect the mimetype so audio enclosures don't
+  // get misclassified as thumbnails.
   for (const tag of event.tags) {
     if (tag[0] === 'imeta') {
       const urlEntry = tag.find((v) => v.startsWith('url '));
-      if (urlEntry) urls.push(urlEntry.slice(4));
+      const mimeEntry = tag.find((v) => v.startsWith('m '));
+      if (urlEntry) {
+        const url = urlEntry.slice(4);
+        const mime = mimeEntry?.slice(2).toLowerCase() ?? '';
+        const looksLikeImage = mime.startsWith('image/') || (!mime && imageExt.test(url));
+        if (looksLikeImage) urls.push(url);
+      }
     }
   }
 
