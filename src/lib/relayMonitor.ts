@@ -202,3 +202,18 @@ export function addEventLog(
 export function removeRelay(url: string) {
   if (relayMap.delete(url)) notify();
 }
+
+/**
+ * Drop every relay that is not in the active set. This keeps the monitor's
+ * total/connected counts in line with the relays the pool is actually using.
+ */
+export function syncRelayMap(activeUrls: Set<string>): void {
+  let changed = false;
+  for (const url of relayMap.keys()) {
+    if (!activeUrls.has(url)) {
+      relayMap.delete(url);
+      changed = true;
+    }
+  }
+  if (changed) notify();
+}

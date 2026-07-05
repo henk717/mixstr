@@ -12,6 +12,7 @@ import {
   markRelayFailed,
   unmarkRelayFailed,
   isRelayFailed,
+  syncRelayMap,
   type RelayEntry,
 } from '@/lib/relayMonitor';
 
@@ -124,9 +125,7 @@ function patchRelaySocket(relay: NRelay1, url: string, type: RelayEntry['type'])
   };
 
   const setError = () => {
-    if (!connectedThisSession.has(url)) {
-      markRelayFailed(url);
-    }
+    markRelayFailed(url);
     updateRelayStatus(url, 'error', type);
     addEventLog('error', url, 'Connection error');
   };
@@ -274,6 +273,10 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
           routes.set(url, filters);
         }
       }
+
+      // Keep the monitor's total count aligned with the relays the pool is
+      // actually routing to. Pinned relays always take a slot.
+      syncRelayMap(new Set<string>([...pinnedUrls, ...activeGossip]));
 
       return routes;
     },
