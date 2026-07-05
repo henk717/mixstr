@@ -18,7 +18,9 @@ import {
 } from '@/lib/postUtils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useMixstr } from '@/hooks/useMixstr';
+import { useVideoThumbnail } from '@/hooks/useVideoThumbnail';
 import type { AudioTrack } from '@/contexts/MixstrContext';
 
 interface MediaCardProps {
@@ -49,8 +51,13 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   const embed = embeds[0];
   const title = getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim();
 
-  // Choose thumbnail
+  // Choose thumbnail: explicit first, then extract a frame from the video if available.
   const thumbnail = embed?.thumbnail ?? images[0];
+  const firstVideo = videos[0];
+  const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
+    !thumbnail && firstVideo ? firstVideo : undefined,
+  );
+  const displayThumbnail = thumbnail || videoFrame;
   const nevent = eventToNevent(displayEvent);
 
   // Nothing displayable
@@ -69,7 +76,7 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
       title: trackInfo.title,
       url: trackInfo.url,
       artist: displayName,
-      artwork: thumbnail,
+      artwork: displayThumbnail,
     };
     addToQueue(track);
   };
@@ -83,13 +90,15 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
     >
       {/* Thumbnail area */}
       <div className="relative aspect-video bg-black overflow-hidden">
-        {thumbnail ? (
+        {displayThumbnail ? (
           <img
-            src={thumbnail}
+            src={displayThumbnail}
             alt={title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             loading="lazy"
           />
+        ) : frameLoading ? (
+          <Skeleton className="absolute inset-0 w-full h-full" />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-muted">
             <Image size={32} className="text-muted-foreground" />

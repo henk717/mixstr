@@ -13,8 +13,10 @@ import {
   tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
 import { useMixstr } from '@/hooks/useMixstr';
+import { useVideoThumbnail } from '@/hooks/useVideoThumbnail';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { AudioTrack } from '@/contexts/MixstrContext';
 
 interface AudioCardProps {
@@ -44,12 +46,18 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
   // Nothing playable
   if (!trackInfo) return null;
 
+  const explicitArtwork = trackInfo.artwork ?? cover;
+  const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
+    !explicitArtwork && trackInfo.isVideo ? trackInfo.url : undefined,
+  );
+  const artwork = explicitArtwork || videoFrame;
+
   const track: AudioTrack = {
     event: displayEvent,
     title: trackInfo.title,
     url: trackInfo.url,
     artist: displayName,
-    artwork: trackInfo.artwork ?? cover,
+    artwork,
   };
 
   const handlePlay = (e: React.MouseEvent) => {
@@ -74,13 +82,15 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
     >
       {/* Album art / video thumbnail with play overlay */}
       <div className="relative w-14 h-14 flex-shrink-0 rounded-lg overflow-hidden bg-muted">
-        {track.artwork ? (
+        {artwork ? (
           <img
-            src={track.artwork}
+            src={artwork}
             alt={title}
             className="w-full h-full object-cover"
             loading="lazy"
           />
+        ) : frameLoading ? (
+          <Skeleton className="w-full h-full" />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             {trackInfo.isVideo ? (
