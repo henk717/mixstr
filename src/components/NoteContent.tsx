@@ -24,6 +24,8 @@ import { IMAGE_URL_REGEX, EMBED_MEDIA_URL_REGEX } from '@/lib/mediaUrls';
 import { parseImetaMap } from '@/lib/imeta';
 import { sanitizeUrl } from '@/lib/sanitizeUrl';
 import { cn } from '@/lib/utils';
+import { getExternalEmbed } from '@/lib/postUtils';
+import type { ExternalEmbed } from '@/lib/postUtils';
 
 /** Coordinates for an addressable event (naddr). */
 export interface AddrCoords {
@@ -46,6 +48,10 @@ interface NoteContentProps {
    *  whitespace) while link preview cards and other non-media embeds are preserved.
    *  Used inside embedded quote cards to keep them lightweight. */
   disableMediaEmbeds?: boolean;
+  /** When true, known external embed URLs (YouTube, Twitch, Spotify, SoundCloud) that
+   *  would normally become link preview cards are instead rendered as inline iframe
+   *  players. Opt-in; keeps short-view / embedded-card contexts lightweight by default. */
+  inlineExternalEmbeds?: boolean;
   /**
    * Nesting depth for embedded note cards. A depth >= 1 suppresses media inside
    * embedded notes so parent contexts (e.g. short-view feed cards) keep control
@@ -198,6 +204,7 @@ type ContentToken =
   | { type: 'media-embed'; url: string }
   | { type: 'link-embed'; url: string }
   | { type: 'inline-link'; url: string }
+  | { type: 'external-embed'; embed: ExternalEmbed }
   | { type: 'mention'; pubkey: string }
   | { type: 'nevent-embed'; eventId: string; relays?: string[]; author?: string }
   | { type: 'naddr-embed'; addr: AddrCoords; url?: string }
@@ -261,6 +268,7 @@ export function NoteContent({
   hideEmbedImages = false,
   disableNoteEmbeds = false,
   disableMediaEmbeds = false,
+  inlineExternalEmbeds = false,
   depth = 0,
 }: NoteContentProps) {
   const tokens = useMemo(() => {
@@ -362,6 +370,14 @@ export function NoteContent({
         const naddrFromUrl = extractNaddrFromUrl(url);
         if (naddrFromUrl) {
           result.push({ type: 'naddr-embed', addr: naddrFromUrl, url });
+        } else if (isEndOfLine && inlineExternalEmbeds) {
+          // Standalone URL for a known external embed source → inline player
+          const embed = getExternalEmbed(url);
+          if (embed) {
+            result.push({ type: 'external-embed', embed });
+          } else {
+            result.push({ type: 'link-embed', url });
+          }
         } else if (isEndOfLine) {
           // Standalone URL at end of line → rich embed (link preview)
           result.push({ type: 'link-embed', url });
@@ -476,7 +492,8 @@ export function NoteContent({
     // Preserve formatting but prevent too much stacking with the card's own spacing.
     for (let i = 0; i < result.length; i++) {
       const token = result[i];
-      const isBlock = token.type === 'image-embed' || token.type === 'media-embed' || token.type === 'link-embed' || token.type === 'nevent-embed'
+      const isBlock = token.type === 'image-embed' || token.type === 'media-embed' || token.type === 'link-embed'
+        || token.type === 'external-embed' || token.type === 'nevent-embed'
         || (token.type === 'naddr-embed' && !token.url) || token.type === 'lightning-invoice';
 
       if (isBlock) {
@@ -513,7 +530,7 @@ export function NoteContent({
 
     // Filter out empty text tokens
     return result.filter((t) => !(t.type === 'text' && t.value === ''));
-  }, [event]);
+  }, [event, inlineExternalEmbeds]);
 
   // Build emoji map for NIP-30 custom emoji rendering.
   // Merge the event's own emoji tags with the viewer's custom emoji collection
@@ -665,6 +682,34 @@ export function NoteContent({
               );
             }
             return <LinkEmbed key={i} url={token.url} className="my-2.5" hideImage={hideEmbedImages} />;
+          case 'external-embed': {
+            if (disableEmbeds) {
+              return (
+                <a
+                  key={i}
+                  href={token.embed.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline break-all"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {token.embed.url}
+                </a>
+              );
+            }
+            return (
+              <div key={i} className="rounded-xl overflow-hidden border border-border aspect-video my-2.5">
+                <iframe
+                  src={token.embed.embedUrl}
+                  className="w-full h-full"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  loading="lazy"
+                  title={token.embed.label}
+                />
+              </div>
+            );
+          }
           case 'inline-link':
             return (
               <a

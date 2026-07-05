@@ -96,6 +96,71 @@ export interface ExternalEmbed {
 }
 
 /**
+ * Return embed info for a single URL, or null if the URL is not a known
+ * external embed source (YouTube, Twitch, Spotify, SoundCloud).
+ */
+export function getExternalEmbed(url: string): ExternalEmbed | null {
+  // YouTube
+  const ytMatch = url.match(
+    /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
+  );
+  if (ytMatch) {
+    return {
+      type: 'youtube',
+      url,
+      embedUrl: `https://www.youtube-nocookie.com/embed/${ytMatch[1]}`,
+      label: 'YouTube',
+      thumbnail: `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`,
+    };
+  }
+
+  // Twitch clip
+  const twitchClip = url.match(/twitch\.tv\/\w+\/clip\/(\w+)/);
+  if (twitchClip) {
+    return {
+      type: 'twitch',
+      url,
+      embedUrl: `https://clips.twitch.tv/embed?clip=${twitchClip[1]}&parent=${window.location.hostname}`,
+      label: 'Twitch Clip',
+    };
+  }
+
+  // Twitch stream
+  const twitchStream = url.match(/twitch\.tv\/(\w+)(?:$|[^/])/);
+  if (twitchStream && !url.includes('/clip/') && !url.includes('/videos/')) {
+    return {
+      type: 'twitch',
+      url,
+      embedUrl: `https://player.twitch.tv/?channel=${twitchStream[1]}&parent=${window.location.hostname}`,
+      label: 'Twitch Stream',
+    };
+  }
+
+  // Spotify
+  const spotifyMatch = url.match(/open\.spotify\.com\/(track|album|playlist|episode)\/([A-Za-z0-9]+)/);
+  if (spotifyMatch) {
+    return {
+      type: 'spotify',
+      url,
+      embedUrl: `https://open.spotify.com/embed/${spotifyMatch[1]}/${spotifyMatch[2]}`,
+      label: `Spotify ${spotifyMatch[1]}`,
+    };
+  }
+
+  // SoundCloud
+  if (url.includes('soundcloud.com/') && !url.includes('api.soundcloud')) {
+    return {
+      type: 'soundcloud',
+      url,
+      embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%23ff5500&auto_play=false`,
+      label: 'SoundCloud',
+    };
+  }
+
+  return null;
+}
+
+/**
  * Extract external embeds (YouTube, Twitch, Spotify, SoundCloud, etc.)
  * from event content URLs.
  */
@@ -111,71 +176,10 @@ export function extractExternalEmbeds(event: NostrEvent): ExternalEmbed[] {
   for (const url of allUrls) {
     if (seen.has(url)) continue;
 
-    // YouTube
-    const ytMatch = url.match(
-      /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
-    );
-    if (ytMatch) {
+    const embed = getExternalEmbed(url);
+    if (embed) {
       seen.add(url);
-      embeds.push({
-        type: 'youtube',
-        url,
-        embedUrl: `https://www.youtube-nocookie.com/embed/${ytMatch[1]}`,
-        label: 'YouTube',
-        thumbnail: `https://img.youtube.com/vi/${ytMatch[1]}/hqdefault.jpg`,
-      });
-      continue;
-    }
-
-    // Twitch clip
-    const twitchClip = url.match(/twitch\.tv\/\w+\/clip\/(\w+)/);
-    if (twitchClip) {
-      seen.add(url);
-      embeds.push({
-        type: 'twitch',
-        url,
-        embedUrl: `https://clips.twitch.tv/embed?clip=${twitchClip[1]}&parent=${window.location.hostname}`,
-        label: 'Twitch Clip',
-      });
-      continue;
-    }
-
-    // Twitch stream
-    const twitchStream = url.match(/twitch\.tv\/(\w+)(?:$|[^/])/);
-    if (twitchStream && !url.includes('/clip/') && !url.includes('/videos/')) {
-      seen.add(url);
-      embeds.push({
-        type: 'twitch',
-        url,
-        embedUrl: `https://player.twitch.tv/?channel=${twitchStream[1]}&parent=${window.location.hostname}`,
-        label: 'Twitch Stream',
-      });
-      continue;
-    }
-
-    // Spotify
-    const spotifyMatch = url.match(/open\.spotify\.com\/(track|album|playlist|episode)\/([A-Za-z0-9]+)/);
-    if (spotifyMatch) {
-      seen.add(url);
-      embeds.push({
-        type: 'spotify',
-        url,
-        embedUrl: `https://open.spotify.com/embed/${spotifyMatch[1]}/${spotifyMatch[2]}`,
-        label: `Spotify ${spotifyMatch[1]}`,
-      });
-      continue;
-    }
-
-    // SoundCloud
-    if (url.includes('soundcloud.com/') && !url.includes('api.soundcloud')) {
-      seen.add(url);
-      embeds.push({
-        type: 'soundcloud',
-        url,
-        embedUrl: `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%23ff5500&auto_play=false`,
-        label: 'SoundCloud',
-      });
-      continue;
+      embeds.push(embed);
     }
   }
 

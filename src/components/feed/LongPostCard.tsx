@@ -11,7 +11,6 @@ import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
 import {
   extractImages,
   extractVideos,
-  extractExternalEmbeds,
   getEventTitle,
   getCoverImage,
   getSummary,
@@ -63,8 +62,7 @@ export function LongPostCard({ event }: LongPostCardProps) {
 
   const images = extractImages(event);
   const videos = extractVideos(event);
-  const embeds = extractExternalEmbeds(event);
-  const hasAnyMedia = eventHasMedia(event) || images.length > 0 || videos.length > 0 || embeds.length > 0;
+  const hasAnyMedia = eventHasMedia(event) || images.length > 0 || videos.length > 0;
 
   // Only clamp text for extremely long text-only posts.
   // If the post has media, always show full text so context isn't cut off.
@@ -117,10 +115,11 @@ export function LongPostCard({ event }: LongPostCardProps) {
                 {summary && (
                   <p className="text-sm text-muted-foreground">{summary}</p>
                 )}
-                <NoteContent
-                  event={event}
-                  className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
-                />
+              <NoteContent
+                event={event}
+                className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
+                inlineExternalEmbeds
+              />
                 {shouldClampText && (
                   <button
                     className="text-xs text-primary flex items-center gap-1 hover:underline"
@@ -152,6 +151,7 @@ export function LongPostCard({ event }: LongPostCardProps) {
                 event={event}
                 className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
                 disableMediaEmbeds
+                inlineExternalEmbeds
               />
 
               {shouldClampText && (
@@ -203,23 +203,6 @@ export function LongPostCard({ event }: LongPostCardProps) {
                 </div>
               )}
 
-              {/* ── External embeds (YouTube, Twitch, Spotify, SoundCloud…) ── */}
-              {embeds.map((embed) => (
-                <div
-                  key={embed.url}
-                  className="rounded-xl overflow-hidden border border-border aspect-video"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <iframe
-                    src={embed.embedUrl}
-                    className="w-full h-full"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    loading="lazy"
-                    title={embed.label}
-                  />
-                </div>
-              ))}
             </>
           )}
         </div>

@@ -137,11 +137,11 @@ function EventDetailBody({ event }: { event: NostrEvent }) {
               {title && <h1 className="text-xl font-bold text-foreground leading-snug">{title}</h1>}
               {summary && <p className="text-sm text-muted-foreground italic">{summary}</p>}
               <div className="prose prose-invert prose-sm max-w-none">
-                <NoteContent event={event} />
+                <NoteContent event={event} inlineExternalEmbeds />
               </div>
             </>
           ) : (
-            <NoteContent event={event} className="text-sm leading-relaxed" />
+            <NoteContent event={event} className="text-sm leading-relaxed" inlineExternalEmbeds />
           )}
         </div>
 
