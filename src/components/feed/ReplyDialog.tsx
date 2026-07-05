@@ -7,12 +7,14 @@ import { useAuthor } from '@/hooks/useAuthor';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { MentionTextarea } from './MentionTextarea';
+import { extractContentTags } from '@/lib/mentions';
 import { Loader2, CornerDownRight } from 'lucide-react';
 import { NoteContent } from '@/components/NoteContent';
 import { relativeTime } from '@/lib/postUtils';
@@ -24,8 +26,6 @@ interface ReplyDialogProps {
   replyTo: NostrEvent;
 }
 
-const MAX_LENGTH = 500;
-
 export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
   const { user, metadata } = useCurrentUser();
   const { mutateAsync: publish, isPending } = useNostrPublish();
@@ -34,9 +34,7 @@ export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const trimmed = content.trim();
-  const charCount = content.length;
-  const overLimit = charCount > MAX_LENGTH;
-  const canPost = trimmed.length > 0 && !overLimit && !isPending;
+  const canPost = trimmed.length > 0 && !isPending;
 
   // Focus textarea when dialog opens
   useEffect(() => {
@@ -66,13 +64,27 @@ export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
         eTags.push(['e', replyTo.id, '', 'root']);
       }
 
-      // Mention the original author
+      // Mention the original author and any @-mentions in the reply text.
+      const seenP = new Set<string>([replyTo.pubkey]);
       const pTags: string[][] = [['p', replyTo.pubkey]];
+      const tTags: string[][] = [];
+
+      for (const tag of extractContentTags(trimmed)) {
+        if (tag[0] === 'p') {
+          const pubkey = tag[1];
+          if (!seenP.has(pubkey)) {
+            seenP.add(pubkey);
+            pTags.push(tag);
+          }
+        } else if (tag[0] === 't') {
+          tTags.push(tag);
+        }
+      }
 
       await publish({
         kind: 1,
         content: trimmed,
-        tags: [...eTags, ...pTags],
+        tags: [...eTags, ...pTags, ...tTags],
       });
 
       toast({ title: 'Reply posted!', description: 'Your reply was published to Nostr.' });
@@ -98,9 +110,6 @@ export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
     metadata?.name?.trim() ||
     'You';
 
-  const charsLeft = MAX_LENGTH - charCount;
-  const showCounter = charCount > MAX_LENGTH - 60;
-
   if (!user) return null;
 
   return (
@@ -108,6 +117,9 @@ export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
       <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-5 pt-5 pb-0">
           <DialogTitle className="sr-only">Reply to post</DialogTitle>
+          <DialogDescription className="sr-only">
+            Write a reply to the selected Nostr note.
+          </DialogDescription>
         </DialogHeader>
 
         {/* Original post preview */}
@@ -131,13 +143,13 @@ export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
               <CornerDownRight size={11} />
               <span>replying as <span className="text-foreground font-medium">{displayName}</span></span>
             </div>
-            <Textarea
+            <MentionTextarea
               ref={textareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Write your reply…"
-              className="resize-none border-0 bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[100px] shadow-none"
+              className="border-0 bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[100px] shadow-none"
               disabled={isPending}
             />
           </div>
@@ -148,15 +160,6 @@ export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
           <div className="text-xs text-muted-foreground">Ctrl+Enter to post</div>
 
           <div className="flex items-center gap-3">
-            {showCounter && (
-              <span
-                className={`text-xs font-medium tabular-nums ${
-                  overLimit ? 'text-destructive' : charsLeft <= 20 ? 'text-yellow-500' : 'text-muted-foreground'
-                }`}
-              >
-                {charsLeft}
-              </span>
-            )}
             <Button
               size="sm"
               className="rounded-full px-5 font-semibold"

@@ -212,3 +212,50 @@
     background: hsl(28 100% 52% / 0.6);
   }
 }
+
+/* react-simple-wysiwyg dark-theme overrides */
+.rsw-editor {
+  border-color: var(--color-border) !important;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+.rsw-toolbar {
+  background: var(--color-muted);
+  border-bottom-color: var(--color-border);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+.rsw-btn {
+  color: var(--color-foreground);
+  background: transparent;
+}
+
+.rsw-btn:hover {
+  background: var(--color-accent);
+}
+
+.rsw-btn[data-active='true'] {
+  background: var(--color-primary);
+  color: var(--color-primary-foreground);
+}
+
+.rsw-ce {
+  color: var(--color-foreground);
+  background: transparent;
+}
+
+.rsw-ce ul {
+  list-style: disc;
+  padding-left: 1.5em;
+}
+
+.rsw-ce ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+}
+
+.rsw-ce a {
+  color: var(--color-primary);
+  text-decoration: underline;
+}
