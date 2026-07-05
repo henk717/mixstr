@@ -42,6 +42,7 @@ export interface FetchDvmFeedOptions {
 const DEFAULT_TIMEOUT = 15_000;
 const MAX_RESULT_EVENTS = 25;
 const ID_CHUNK_SIZE = 50;
+const SINCE_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
 /**
  * Decode npub/nprofile/hex to a hex pubkey.
@@ -71,10 +72,13 @@ export async function fetchDvmFeedEvents(options: FetchDvmFeedOptions): Promise<
   const dvmHex = toPubkeyHex(dvmPubkey);
   if (!dvmHex) return [];
 
+  const since = Math.floor(Date.now() / 1000) - SINCE_WINDOW_SECONDS;
+
   const requestTags: string[][] = [
     ['p', dvmHex],
     ['output', 'application/json'],
     ['param', 'limit', String(limit)],
+    ['param', 'since', String(since)],
   ];
 
   if (user?.pubkey) {
@@ -86,7 +90,7 @@ export async function fetchDvmFeedEvents(options: FetchDvmFeedOptions): Promise<
     requestTags.push(['relays', ...readRelays]);
   }
 
-  const filters: NostrFilter[] = [{ kinds: [6300], authors: [dvmHex], limit: MAX_RESULT_EVENTS }];
+  const filters: NostrFilter[] = [{ kinds: [6300], authors: [dvmHex], limit: MAX_RESULT_EVENTS, since }];
   let requestId: string | undefined;
 
   if (user) {
@@ -298,9 +302,12 @@ async function fetchReferencedEvents(
   }
 
   for (const addr of refs.addresses) {
-    const key = `${addr.kind}:${addr.pubkey}:${addr.identifier}`;
     for (const ev of byId.values()) {
-      if (ev.kind === addr.kind && ev.pubkey === addr.pubkey && ev.tags.find(([t]) => t === 'd')?.[1] === addr.identifier) {
+      if (
+        ev.kind === addr.kind &&
+        ev.pubkey === addr.pubkey &&
+        ev.tags.find(([t]) => t === 'd')?.[1] === addr.identifier
+      ) {
         if (!seen.has(ev.id)) {
           add(ev);
         }

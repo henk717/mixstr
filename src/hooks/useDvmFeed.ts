@@ -54,7 +54,7 @@ export function useDvmFeed({ dvmPubkey, limit = 30 }: UseDvmFeedOptions): UseDvm
       });
     },
     enabled: !!dvmHex,
-    staleTime: 3 * 60 * 1000,
+    staleTime: 0,
     retry: 1,
   });
 

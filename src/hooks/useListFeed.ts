@@ -125,7 +125,7 @@ export function useListFeed(list: SidebarList) {
         .flatMap((r) => r.value);
     },
     enabled: dvmSources.length > 0,
-    staleTime: 3 * 60 * 1000,
+    staleTime: 0,
   });
 
   return useInfiniteQuery<NostrEvent[]>({
