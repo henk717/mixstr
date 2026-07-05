@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Wifi, Users, ExternalLink } from 'lucide-react';
+import { Wifi, Users } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
-import { getLivestreamInfo, eventToNevent, relativeTime } from '@/lib/postUtils';
+import { getLivestreamInfo, livestreamToNaddr, relativeTime } from '@/lib/postUtils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 
@@ -15,15 +15,19 @@ interface LivestreamCardProps {
 export function LivestreamCard({ event }: LivestreamCardProps) {
   const navigate = useNavigate();
   const info = getLivestreamInfo(event);
-  const author = useAuthor(event.pubkey);
+
+  // Use the actual host pubkey (first p-tag with role=Host, fallback to event.pubkey)
+  const hostPubkey = info?.hostPubkey ?? event.pubkey;
+  const author = useAuthor(hostPubkey);
   const meta = author.data?.metadata;
-  const npub = nip19.npubEncode(event.pubkey);
+  const npub = nip19.npubEncode(hostPubkey);
   const rawName = meta?.display_name || meta?.name || '';
-  const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
+  const displayName = rawName.trim() || hostPubkey.slice(0, 10) + '…';
 
   if (!info) return null;
 
-  const nevent = eventToNevent(event);
+  // Addressable events must link via naddr, not nevent
+  const naddr = livestreamToNaddr(event);
   const isLive = info.status === 'live';
   const isEnded = info.status === 'ended';
 
@@ -34,7 +38,7 @@ export function LivestreamCard({ event }: LivestreamCardProps) {
         borderColor: isLive ? 'rgb(220 38 38 / 0.5)' : 'hsl(var(--border))',
         boxShadow: isLive ? '0 0 0 1px rgb(220 38 38 / 0.2)' : undefined,
       }}
-      onClick={() => navigate(`/${nevent}`)}
+      onClick={() => navigate(`/${naddr}`)}
     >
       {/* Thumbnail / background */}
       <div className="relative aspect-video bg-black overflow-hidden">
@@ -63,14 +67,10 @@ export function LivestreamCard({ event }: LivestreamCardProps) {
             </Badge>
           )}
           {isEnded && (
-            <Badge variant="secondary" className="text-xs">
-              Ended
-            </Badge>
+            <Badge variant="secondary" className="text-xs">Ended</Badge>
           )}
           {info.status === 'planned' && (
-            <Badge className="bg-blue-600 text-white border-0 text-xs">
-              Upcoming
-            </Badge>
+            <Badge className="bg-blue-600 text-white border-0 text-xs">Upcoming</Badge>
           )}
         </div>
 
@@ -82,7 +82,7 @@ export function LivestreamCard({ event }: LivestreamCardProps) {
           </div>
         )}
 
-        {/* Title + author overlay at bottom */}
+        {/* Title + host overlay at bottom */}
         <div className="absolute bottom-0 left-0 right-0 p-3">
           <p className="text-white font-bold text-sm line-clamp-2 leading-snug mb-1.5">
             {info.title}

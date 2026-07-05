@@ -4,6 +4,7 @@ import NotFound from './NotFound';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ProfilePage } from './ProfilePage';
 import { EventDetailPage } from './EventDetailPage';
+import { LivestreamDetailPage } from './LivestreamDetailPage';
 
 export function NIP19Page() {
   const { nip19: identifier } = useParams<{ nip19: string }>();
@@ -52,12 +53,22 @@ export function NIP19Page() {
     }
 
     case 'naddr': {
-      // Addressable events (articles etc.) — navigate to event detail
+      const { kind, pubkey, identifier: dTag } = decoded.data;
+      // Kind 30311 = NIP-53 livestream — dedicated page with player + live chat
+      if (kind === 30311) {
+        return (
+          <MainLayout>
+            <LivestreamDetailPage pubkey={pubkey} dTag={dTag} />
+          </MainLayout>
+        );
+      }
+      // All other addressable events (articles, etc.)
       return (
         <MainLayout>
           <EventDetailPage
-            eventId={decoded.data.identifier}
-            pubkey={decoded.data.pubkey}
+            eventId={dTag}
+            pubkey={pubkey}
+            kind={kind}
           />
         </MainLayout>
       );

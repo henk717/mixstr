@@ -1,0 +1,341 @@
+import { useState, useRef, useEffect } from 'react';
+import { useSeoMeta } from '@unhead/react';
+import { useNavigate } from 'react-router-dom';
+import { useNostr } from '@nostrify/react';
+import { useQuery } from '@tanstack/react-query';
+import { nip19 } from 'nostr-tools';
+import type { NostrEvent } from '@nostrify/nostrify';
+import { useAuthor } from '@/hooks/useAuthor';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { getLivestreamInfo, relativeTime } from '@/lib/postUtils';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Card, CardContent } from '@/components/ui/card';
+import { ArrowLeft, Wifi, Users, Send, MessageCircle, ExternalLink } from 'lucide-react';
+import { Link } from 'react-router-dom';
+
+interface LivestreamDetailPageProps {
+  pubkey: string;
+  dTag: string;
+}
+
+// ── Live chat message ────────────────────────────────────────────────────────
+
+function ChatMessage({ event }: { event: NostrEvent }) {
+  const author = useAuthor(event.pubkey);
+  const meta = author.data?.metadata;
+  const npub = nip19.npubEncode(event.pubkey);
+  const displayName = meta?.display_name || meta?.name || event.pubkey.slice(0, 8) + '…';
+
+  return (
+    <div className="flex gap-2 py-1.5 group">
+      <Link to={`/${npub}`} className="flex-shrink-0 mt-0.5" onClick={(e) => e.stopPropagation()}>
+        <Avatar className="w-6 h-6">
+          <AvatarImage src={meta?.picture} />
+          <AvatarFallback className="text-[9px] bg-primary/20 text-primary font-bold">
+            {displayName[0].toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+      </Link>
+      <div className="min-w-0 flex-1">
+        <Link
+          to={`/${npub}`}
+          className="text-xs font-semibold text-primary hover:underline mr-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {displayName}
+        </Link>
+        <span className="text-xs text-foreground break-words">{event.content}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
+
+export function LivestreamDetailPage({ pubkey, dTag }: LivestreamDetailPageProps) {
+  const { nostr } = useNostr();
+  const navigate = useNavigate();
+  const { user } = useCurrentUser();
+  const { mutateAsync: publish, isPending: isSending } = useNostrPublish();
+  const [chatMsg, setChatMsg] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Fetch the livestream event
+  const { data: event, isLoading } = useQuery<NostrEvent | null>({
+    queryKey: ['nostr', 'livestream-event', pubkey, dTag],
+    queryFn: async ({ signal }) => {
+      const [ev] = await nostr.query(
+        [{ kinds: [30311], authors: [pubkey], '#d': [dTag], limit: 1 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+      );
+      return ev ?? null;
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000, // Re-fetch every 30s to get viewer count updates
+  });
+
+  const info = event ? getLivestreamInfo(event) : null;
+  const hostPubkey = info?.hostPubkey ?? pubkey;
+  const hostAuthor = useAuthor(hostPubkey);
+  const hostMeta = hostAuthor.data?.metadata;
+  const hostNpub = nip19.npubEncode(hostPubkey);
+  const hostName = hostMeta?.display_name || hostMeta?.name || hostPubkey.slice(0, 10) + '…';
+
+  const isLive = info?.status === 'live';
+
+  useSeoMeta({ title: info ? `${info.title} · Mixstr` : 'Livestream · Mixstr' });
+
+  // The naddr coordinate used as the 'a' tag for live chat messages
+  const aTagValue = `30311:${pubkey}:${dTag}`;
+
+  // Fetch live chat messages (kind 1311 tagged with this stream's 'a' coordinate)
+  const { data: chatMessages = [] } = useQuery<NostrEvent[]>({
+    queryKey: ['nostr', 'live-chat', aTagValue],
+    queryFn: async ({ signal }) => {
+      const events = await nostr.query(
+        [{ kinds: [1311], '#a': [aTagValue], limit: 200 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+      );
+      return events.sort((a, b) => a.created_at - b.created_at);
+    },
+    enabled: !!event,
+    staleTime: 5 * 1000,
+    refetchInterval: 10 * 1000,
+  });
+
+  // Scroll chat to bottom when new messages arrive
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages.length]);
+
+  async function handleSendChat() {
+    if (!chatMsg.trim() || !event) return;
+    try {
+      await publish({
+        kind: 1311,
+        content: chatMsg.trim(),
+        tags: [['a', aTagValue, '', 'root']],
+      });
+      setChatMsg('');
+    } catch {
+      // ignore
+    }
+  }
+
+  function handleChatKey(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendChat();
+    }
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border px-4 py-3 flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="w-8 h-8 flex-shrink-0" onClick={() => navigate(-1)}>
+          <ArrowLeft size={18} />
+        </Button>
+        <h1 className="text-base font-bold truncate flex-1">
+          {isLoading ? 'Loading…' : (info?.title ?? 'Livestream')}
+        </h1>
+        {isLive && (
+          <Badge className="bg-red-600 text-white border-0 gap-1 text-xs font-bold flex-shrink-0">
+            <Wifi size={10} className="animate-pulse" />
+            LIVE
+          </Badge>
+        )}
+      </div>
+
+      {/* Loading */}
+      {isLoading && (
+        <div className="p-4 space-y-4">
+          <Skeleton className="w-full aspect-video rounded-xl" />
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/3" />
+        </div>
+      )}
+
+      {/* Not found */}
+      {!isLoading && !event && (
+        <Card className="border-dashed mx-4 my-8">
+          <CardContent className="py-12 text-center text-muted-foreground text-sm">
+            Stream not found or may have ended.
+          </CardContent>
+        </Card>
+      )}
+
+      {event && info && (
+        <div className="flex flex-col lg:flex-row gap-0 lg:gap-4 lg:p-4">
+          {/* Left: video + info */}
+          <div className="flex-1 min-w-0">
+            {/* Video player */}
+            <div className="relative aspect-video bg-black lg:rounded-xl overflow-hidden">
+              {info.streamUrl ? (
+                <video
+                  key={info.streamUrl}
+                  src={info.streamUrl}
+                  controls
+                  autoPlay
+                  className="w-full h-full object-contain"
+                  playsInline
+                />
+              ) : info.thumbnail ? (
+                <div className="relative w-full h-full">
+                  <img
+                    src={info.thumbnail}
+                    alt={info.title}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+                    <Wifi size={40} className={isLive ? 'text-red-400 animate-pulse' : 'text-muted-foreground'} />
+                    <p className="text-white/80 text-sm">
+                      {isLive ? 'Stream player not available in browser' : 'Stream has ended'}
+                    </p>
+                    {info.streamUrl && (
+                      <a
+                        href={info.streamUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                      >
+                        <ExternalLink size={12} />
+                        Open stream directly
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-red-950 to-black">
+                  <Wifi size={48} className={isLive ? 'text-red-500 animate-pulse' : 'text-muted-foreground'} />
+                  <p className="text-white/60 text-sm">
+                    {isLive ? 'No stream URL available' : 'Stream has ended'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Stream info */}
+            <div className="px-4 py-3 lg:px-0">
+              <h2 className="text-lg font-bold text-foreground leading-snug">{info.title}</h2>
+
+              <div className="flex items-center gap-3 mt-2 flex-wrap">
+                {/* Host */}
+                <Link to={`/${hostNpub}`} className="flex items-center gap-2 group">
+                  <Avatar className="w-7 h-7">
+                    <AvatarImage src={hostMeta?.picture} />
+                    <AvatarFallback className="text-xs bg-primary/20 text-primary font-bold">
+                      {hostName[0].toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm font-semibold group-hover:text-primary transition-colors">
+                    {hostName}
+                  </span>
+                </Link>
+
+                {/* Viewer count */}
+                {info.viewers != null && (
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <Users size={13} />
+                    {info.viewers.toLocaleString()} watching
+                  </div>
+                )}
+
+                {/* Status */}
+                {info.status === 'planned' && (
+                  <Badge className="bg-blue-600 text-white border-0 text-xs">Upcoming</Badge>
+                )}
+                {info.status === 'ended' && (
+                  <Badge variant="secondary" className="text-xs">Ended</Badge>
+                )}
+
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {relativeTime(event.created_at)}
+                </span>
+              </div>
+
+              {/* Summary */}
+              {event.tags.find(([t]) => t === 'summary')?.[1] && (
+                <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+                  {event.tags.find(([t]) => t === 'summary')![1]}
+                </p>
+              )}
+
+              {/* Hashtags */}
+              {event.tags.filter(([t]) => t === 't').length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {event.tags.filter(([t]) => t === 't').map(([, tag]) => (
+                    <Badge key={tag} variant="secondary" className="text-xs">
+                      #{tag}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right: live chat */}
+          <div className="w-full lg:w-80 xl:w-96 flex-shrink-0 border-t border-border lg:border lg:rounded-xl overflow-hidden flex flex-col"
+            style={{ height: 'clamp(300px, 50vh, 500px)' }}>
+            {/* Chat header */}
+            <div className="px-3 py-2.5 border-b border-border flex items-center gap-2 bg-card flex-shrink-0">
+              <MessageCircle size={14} className="text-primary" />
+              <span className="text-sm font-semibold">Live Chat</span>
+              <span className="text-xs text-muted-foreground ml-auto">
+                {chatMessages.length} messages
+              </span>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0">
+              {chatMessages.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-6">
+                  {isLive ? 'No messages yet. Be the first to chat!' : 'No chat messages for this stream.'}
+                </p>
+              )}
+              {chatMessages.map((msg) => (
+                <ChatMessage key={msg.id} event={msg} />
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Chat input */}
+            {isLive && (
+              <div className="px-3 py-2 border-t border-border flex gap-2 flex-shrink-0">
+                {user ? (
+                  <>
+                    <Input
+                      value={chatMsg}
+                      onChange={(e) => setChatMsg(e.target.value)}
+                      onKeyDown={handleChatKey}
+                      placeholder="Say something…"
+                      className="h-8 text-sm flex-1"
+                      disabled={isSending}
+                    />
+                    <Button
+                      size="icon"
+                      className="h-8 w-8 flex-shrink-0 rounded-full"
+                      onClick={handleSendChat}
+                      disabled={!chatMsg.trim() || isSending}
+                    >
+                      <Send size={13} />
+                    </Button>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-1">
+                    Log in to chat
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

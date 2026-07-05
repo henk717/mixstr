@@ -28,17 +28,25 @@ import {
 interface EventDetailPageProps {
   eventId: string;
   pubkey?: string;
+  /** For addressable events — the kind number (used with pubkey + d-tag) */
+  kind?: number;
 }
 
-export function EventDetailPage({ eventId, pubkey }: EventDetailPageProps) {
+export function EventDetailPage({ eventId, pubkey, kind }: EventDetailPageProps) {
   const { nostr } = useNostr();
 
   const { data: event, isLoading } = useQuery<NostrEvent | null>({
-    queryKey: ['nostr', 'event-detail', eventId],
+    queryKey: ['nostr', 'event-detail', eventId, pubkey ?? '', kind ?? 0],
     queryFn: async ({ signal }) => {
-      const filter = pubkey
-        ? [{ ids: [eventId], authors: [pubkey], limit: 1 }]
-        : [{ ids: [eventId], limit: 1 }];
+      let filter;
+      if (kind && pubkey) {
+        // Addressable event: query by kind + author + d-tag
+        filter = [{ kinds: [kind], authors: [pubkey], '#d': [eventId], limit: 1 }];
+      } else if (pubkey) {
+        filter = [{ ids: [eventId], authors: [pubkey], limit: 1 }];
+      } else {
+        filter = [{ ids: [eventId], limit: 1 }];
+      }
       const [ev] = await nostr.query(filter, {
         signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]),
       });

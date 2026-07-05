@@ -251,6 +251,10 @@ export function getLivestreamInfo(event: NostrEvent): {
   streamUrl?: string;
   viewers?: number;
   thumbnail?: string;
+  /** The actual broadcaster — first p-tagged Host, or the event author */
+  hostPubkey: string;
+  /** d-tag identifier (needed for naddr links) */
+  dTag: string;
 } | null {
   if (event.kind !== 30311) return null;
   const title = getEventTitle(event) || 'Live Stream';
@@ -261,7 +265,22 @@ export function getLivestreamInfo(event: NostrEvent): {
   const viewersStr = event.tags.find(([t]) => t === 'current_participants')?.[1];
   const viewers = viewersStr ? parseInt(viewersStr, 10) : undefined;
   const thumbnail = getCoverImage(event);
-  return { title, status, streamUrl, viewers, thumbnail };
+  const dTag = event.tags.find(([t]) => t === 'd')?.[1] ?? '';
+  // Host is the p-tag with role "Host", falling back to event author
+  const hostTag = event.tags.find(([t, , , role]) => t === 'p' && role?.toLowerCase() === 'host');
+  const hostPubkey = hostTag?.[1] ?? event.pubkey;
+  return { title, status, streamUrl, viewers, thumbnail, hostPubkey, dTag };
+}
+
+/** Encode a kind 30311 addressable event as an naddr identifier */
+export function livestreamToNaddr(event: NostrEvent): string {
+  try {
+    const { nip19 } = require('nostr-tools') as typeof import('nostr-tools');
+    const dTag = event.tags.find(([t]) => t === 'd')?.[1] ?? '';
+    return nip19.naddrEncode({ kind: 30311, pubkey: event.pubkey, identifier: dTag });
+  } catch {
+    return event.id;
+  }
 }
 
 /** Check if event has displayable media (images or videos) */
