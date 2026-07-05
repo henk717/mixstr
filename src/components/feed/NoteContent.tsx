@@ -1,25 +1,35 @@
-import { useState } from 'react';
 import { stripMediaUrls } from '@/lib/postUtils';
+import { cn } from '@/lib/utils';
 
 interface NoteContentProps {
   content: string;
+  /** If set, clamp the text to this many lines. Pass undefined for full height. */
   maxLines?: number;
 }
 
 export function NoteContent({ content, maxLines }: NoteContentProps) {
-  const [expanded, setExpanded] = useState(false);
   const text = stripMediaUrls(content);
 
-  // Check if content needs truncation
-  const shouldTruncate = maxLines != null && !expanded && text.length > 280;
+  // Map maxLines → Tailwind line-clamp class
+  const clampClass: string | undefined = maxLines != null
+    ? maxLines <= 1 ? 'line-clamp-1'
+    : maxLines === 2 ? 'line-clamp-2'
+    : maxLines === 3 ? 'line-clamp-3'
+    : maxLines === 4 ? 'line-clamp-4'
+    : maxLines === 5 ? 'line-clamp-5'
+    : 'line-clamp-6'
+    : undefined;
 
-  const renderedText = shouldTruncate ? text.slice(0, 280) + '…' : text;
-
-  // Simple linkification
-  const parts = renderedText.split(/(\s+)/);
+  // Simple linkification — split on whitespace tokens
+  const parts = text.split(/(\s+)/);
 
   return (
-    <div className="text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-words">
+    <div
+      className={cn(
+        'text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap break-words',
+        clampClass,
+      )}
+    >
       {parts.map((part, i) => {
         if (part.match(/^https?:\/\/\S+$/)) {
           return (
@@ -48,22 +58,10 @@ export function NoteContent({ content, maxLines }: NoteContentProps) {
           );
         }
         if (part.match(/^@?\w{10,}$/)) {
-          // Potential nostr mention
           return <span key={i} className="text-primary/80">{part}</span>;
         }
         return <span key={i}>{part}</span>;
       })}
-      {shouldTruncate && (
-        <button
-          className="ml-1 text-primary text-xs font-semibold hover:underline"
-          onClick={(e) => {
-            e.stopPropagation();
-            setExpanded(true);
-          }}
-        >
-          Show more
-        </button>
-      )}
     </div>
   );
 }

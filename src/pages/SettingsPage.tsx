@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react';
 import { useSeoMeta } from '@unhead/react';
-import { User, Shield, X, Plus, Search, Check, RefreshCw, ExternalLink } from 'lucide-react';
+import { User, Shield, X, Plus, Search, Check, RefreshCw, Wifi, Trash2 } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFollowing } from '@/hooks/useFollowing';
 import { useNostr } from '@nostrify/react';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAppContext } from '@/hooks/useAppContext';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,9 +16,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/useToast';
 import { cn } from '@/lib/utils';
+import { SUGGESTED_RELAYS } from '@/lib/appRelays';
 import type { NostrEvent, NostrMetadata } from '@nostrify/nostrify';
 
 // ---------------------------------------------------------------------------
@@ -407,6 +409,222 @@ function BlockSettings() {
 }
 
 // ---------------------------------------------------------------------------
+// Relay Settings
+// ---------------------------------------------------------------------------
+
+interface RelayEntry {
+  url: string;
+  read: boolean;
+  write: boolean;
+}
+
+function RelaySettings() {
+  const { config, updateConfig } = useAppContext();
+  const { user } = useCurrentUser();
+  const { mutateAsync: publish, isPending: isPublishing } = useNostrPublish();
+  const { toast } = useToast();
+
+  const [relays, setRelays] = useState<RelayEntry[]>(
+    () => config.relayMetadata.relays.map((r) => ({ ...r })),
+  );
+  const [urlInput, setUrlInput] = useState('');
+
+  const addRelay = () => {
+    const raw = urlInput.trim();
+    if (!raw) return;
+    const url = raw.startsWith('wss://') || raw.startsWith('ws://') ? raw : `wss://${raw}`;
+    if (!relays.find((r) => r.url === url)) {
+      setRelays((prev) => [...prev, { url, read: true, write: true }]);
+    }
+    setUrlInput('');
+  };
+
+  const addSuggested = (url: string) => {
+    if (!relays.find((r) => r.url === url)) {
+      setRelays((prev) => [...prev, { url, read: true, write: true }]);
+    }
+  };
+
+  const removeRelay = (url: string) =>
+    setRelays((prev) => prev.filter((r) => r.url !== url));
+
+  const toggleRead = (url: string) =>
+    setRelays((prev) =>
+      prev.map((r) => (r.url === url ? { ...r, read: !r.read } : r)),
+    );
+
+  const toggleWrite = (url: string) =>
+    setRelays((prev) =>
+      prev.map((r) => (r.url === url ? { ...r, write: !r.write } : r)),
+    );
+
+  const handleSave = async () => {
+    const now = Math.floor(Date.now() / 1000);
+    updateConfig((current) => ({
+      ...current,
+      relayMetadata: { relays, updatedAt: now },
+    }));
+
+    // Publish NIP-65 kind 10002 event so other clients know our relay list
+    if (user) {
+      try {
+        const tags: string[][] = relays.map(({ url, read, write }) => {
+          if (read && write) return ['r', url];
+          if (read) return ['r', url, 'read'];
+          return ['r', url, 'write'];
+        });
+        await publish({ kind: 10002, content: '', tags });
+        toast({ title: 'Relays saved & published', description: `NIP-65 relay list published to Nostr.` });
+      } catch {
+        toast({ title: 'Relays saved locally', description: 'Could not publish NIP-65 event, but config is saved.', variant: 'default' });
+      }
+    } else {
+      toast({ title: 'Relays saved', description: `${relays.length} relay${relays.length !== 1 ? 's' : ''} configured.` });
+    }
+  };
+
+  const unusedSuggestions = SUGGESTED_RELAYS.filter(
+    (s) => !relays.find((r) => r.url === s.url),
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Privacy notice */}
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="py-3 px-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            <span className="text-foreground font-medium">You control all relay connections.</span>{' '}
+            Mixstr never connects to relays you haven't added here. Read relays are used to
+            fetch content; write relays receive your published events (inbox/outbox model).
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Current relays */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label className="text-sm font-semibold">Your Relays</Label>
+          <span className="text-xs text-muted-foreground">{relays.length} configured</span>
+        </div>
+
+        {relays.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="py-8 text-center">
+              <Wifi size={24} className="text-muted-foreground mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">No relays configured. Add one below.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-1.5">
+            {/* Header row */}
+            <div className="grid grid-cols-[1fr_44px_44px_32px] gap-2 px-3 text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
+              <span>Relay URL</span>
+              <span className="text-center">Read</span>
+              <span className="text-center">Write</span>
+              <span />
+            </div>
+
+            {relays.map((relay) => (
+              <div
+                key={relay.url}
+                className="grid grid-cols-[1fr_44px_44px_32px] gap-2 items-center px-3 py-2.5 rounded-xl border border-border bg-card"
+              >
+                <p className="font-mono text-xs truncate text-foreground">{relay.url}</p>
+
+                {/* Read toggle */}
+                <div className="flex justify-center">
+                  <Switch
+                    checked={relay.read}
+                    onCheckedChange={() => toggleRead(relay.url)}
+                    className="scale-75 origin-center"
+                  />
+                </div>
+
+                {/* Write toggle */}
+                <div className="flex justify-center">
+                  <Switch
+                    checked={relay.write}
+                    onCheckedChange={() => toggleWrite(relay.url)}
+                    className="scale-75 origin-center"
+                  />
+                </div>
+
+                {/* Remove */}
+                <button
+                  onClick={() => removeRelay(relay.url)}
+                  className="text-muted-foreground hover:text-destructive transition-colors flex justify-center"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Add custom relay */}
+      <div className="space-y-2">
+        <Label className="text-sm font-semibold">Add Relay</Label>
+        <div className="flex gap-2">
+          <Input
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addRelay()}
+            placeholder="wss://relay.example.com"
+            className="font-mono text-sm h-9"
+          />
+          <Button size="sm" variant="outline" onClick={addRelay} className="h-9 flex-shrink-0">
+            <Plus size={14} className="mr-1" />
+            Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Suggestions */}
+      {unusedSuggestions.length > 0 && (
+        <div className="space-y-2">
+          <Label className="text-sm font-semibold text-muted-foreground">Suggestions</Label>
+          <div className="space-y-1.5">
+            {unusedSuggestions.map(({ url, description }) => (
+              <button
+                key={url}
+                onClick={() => addSuggested(url)}
+                className="w-full flex items-center justify-between gap-3 text-left px-3 py-2 rounded-xl border border-border bg-card hover:bg-accent transition-colors text-sm group"
+              >
+                <div className="min-w-0">
+                  <p className="font-mono text-xs truncate text-foreground">{url}</p>
+                  <p className="text-[11px] text-muted-foreground">{description}</p>
+                </div>
+                <Plus size={14} className="text-muted-foreground group-hover:text-primary flex-shrink-0 transition-colors" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Save */}
+      <Button
+        onClick={handleSave}
+        disabled={isPublishing}
+        className="bg-primary text-primary-foreground hover:bg-primary/90"
+      >
+        {isPublishing ? (
+          <RefreshCw size={14} className="mr-2 animate-spin" />
+        ) : (
+          <Wifi size={14} className="mr-2" />
+        )}
+        Save Relay Configuration
+      </Button>
+
+      <p className="text-xs text-muted-foreground">
+        Changes take effect immediately. Your NIP-65 relay list is also published to Nostr
+        when you save so other clients can use the inbox/outbox model to reach you.
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main SettingsPage
 // ---------------------------------------------------------------------------
 
@@ -420,18 +638,22 @@ export function SettingsPage() {
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border px-4 py-4">
         <h1 className="text-xl font-bold text-foreground">Settings</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">Manage your profile, privacy, and block list</p>
+        <p className="text-xs text-muted-foreground mt-0.5">Manage your profile, relays, and privacy</p>
       </div>
 
       <div className="px-4 pt-4">
         <Tabs defaultValue="profile">
-          <TabsList className="mb-6 w-full grid grid-cols-2 h-9">
-            <TabsTrigger value="profile" className="text-sm gap-2">
-              <User size={14} />
+          <TabsList className="mb-6 w-full grid grid-cols-3 h-9">
+            <TabsTrigger value="profile" className="text-sm gap-1.5">
+              <User size={13} />
               Profile
             </TabsTrigger>
-            <TabsTrigger value="blocks" className="text-sm gap-2">
-              <Shield size={14} />
+            <TabsTrigger value="relays" className="text-sm gap-1.5">
+              <Wifi size={13} />
+              Relays
+            </TabsTrigger>
+            <TabsTrigger value="blocks" className="text-sm gap-1.5">
+              <Shield size={13} />
               Block List
             </TabsTrigger>
           </TabsList>
@@ -447,6 +669,10 @@ export function SettingsPage() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="relays">
+            <RelaySettings />
           </TabsContent>
 
           <TabsContent value="blocks">

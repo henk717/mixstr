@@ -7,6 +7,7 @@ import { InferSeoMetaPlugin } from 'unhead/plugins';
 import { Suspense } from 'react';
 import NostrProvider from '@/components/NostrProvider';
 import { NostrSync } from '@/components/NostrSync';
+import { RelayGate } from '@/components/RelayGate';
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NostrLoginProvider } from '@nostrify/react/login';
@@ -34,16 +35,14 @@ const queryClient = new QueryClient({
 
 const defaultConfig: AppConfig = {
   theme: "dark",
+  // Start with no relays — user must configure them explicitly.
+  // See src/lib/appRelays.ts for rationale.
   relayMetadata: APP_RELAYS,
   blossomServerMetadata: {
-    servers: [
-      'https://blossom.ditto.pub/',
-      'https://blossom.dreamith.to/',
-      'https://blossom.primal.net/',
-    ],
+    servers: [],
     updatedAt: 0,
   },
-  useAppBlossomServers: true,
+  useAppBlossomServers: false,
 };
 
 export function App() {
@@ -54,14 +53,16 @@ export function App() {
           <NostrLoginProvider storageKey='nostr:login'>
             <NostrProvider>
               <NostrSync />
-              <MixstrProvider>
-                <TooltipProvider>
-                  <Toaster />
-                  <Suspense>
-                    <AppRouter />
-                  </Suspense>
-                </TooltipProvider>
-              </MixstrProvider>
+              <RelayGate>
+                <MixstrProvider>
+                  <TooltipProvider>
+                    <Toaster />
+                    <Suspense>
+                      <AppRouter />
+                    </Suspense>
+                  </TooltipProvider>
+                </MixstrProvider>
+              </RelayGate>
             </NostrProvider>
           </NostrLoginProvider>
         </QueryClientProvider>
