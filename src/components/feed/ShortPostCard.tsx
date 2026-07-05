@@ -61,7 +61,7 @@ export function ShortPostCard({ event }: ShortPostCardProps) {
 
   // For replies: get parent event ID and fetch parent event
   const parentRef = reply ? getParentEventId(event) : null;
-  const { data: parentEvent } = useParentEvent(parentRef);
+  const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
 
   const hasMedia = images.length > 0 || videos.length > 0 || embeds.length > 0;
 
@@ -90,9 +90,11 @@ export function ShortPostCard({ event }: ShortPostCardProps) {
         <ParentEventPreview parent={parentEvent} onParentClick={() => navigate(`/${eventToNevent(parentEvent)}`)} />
       )}
 
-      {/* ── Compact "Replying to" chip (shown while parent is loading or not found) ── */}
+      {/* ── Compact "Replying to" chip ──
+           Show whenever we don't have the full parent event yet (still loading,
+           errored, or not found). Once parentEvent is truthy the block above takes over. */}
       {reply && !parentEvent && parentRef && (
-        <ReplyingToChip event={event} parentId={parentRef.id} parentAuthor={parentRef.author} />
+        <ReplyingToChip event={event} parentId={parentRef.id} parentAuthor={parentRef.author} isPending={parentPending} />
       )}
 
       {/* ── Main post ── */}
@@ -345,13 +347,16 @@ function ParentEventPreview({ parent, onParentClick }: { parent: NostrEvent; onP
 
 /**
  * Compact "Replying to @name" chip, shown while the parent event is still
- * loading or if it couldn't be fetched.
+ * loading or if it couldn't be fetched from any relay.
  */
-function ReplyingToChip({ event, parentId, parentAuthor }: {
+function ReplyingToChip({ event: _event, parentId, parentAuthor, isPending }: {
   event: NostrEvent;
   parentId: string;
   parentAuthor?: string;
+  isPending?: boolean;
 }) {
+  // Try to resolve the author's display name from the pubkey hint in the e-tag.
+  // This often resolves even before the parent event is found, giving us a name.
   const author = useAuthor(parentAuthor ?? '');
   const meta = author.data?.metadata;
   const rawName = meta?.display_name || meta?.name || '';
@@ -377,8 +382,10 @@ function ReplyingToChip({ event, parentId, parentAuthor }: {
         {displayName
           ? `@${displayName}`
           : parentAuthor
-            ? `${parentAuthor.slice(0, 8)}…`
-            : 'a post'}
+            ? `@${parentAuthor.slice(0, 8)}…`
+            : isPending
+              ? '…'
+              : 'a post'}
       </Link>
     </div>
   );

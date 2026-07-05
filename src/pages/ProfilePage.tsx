@@ -181,7 +181,6 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
     fetchNextPage: repliesFetchNext,
   } = useProfileRepliesFeed(pubkey);
 
-  const postPages = useMemo(() => (postEvents.length > 0 ? [postEvents] : []), [postEvents]);
   const replyPages = useMemo(() => (replyEvents.length > 0 ? [replyEvents] : []), [replyEvents]);
 
   // ── Build a synthetic kind-0 event for ProfileAbout ──────────────────────
@@ -215,8 +214,20 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
     followMutation.mutate({ pubkey, action: isFollowing ? 'unfollow' : 'follow' });
   };
 
+  // "Posts only" = exclude events that are replies to other users' posts.
+  // A reply is any kind-1 event that has an 'e' tag referencing another post.
+  // Other kinds (reposts, longform, etc.) are kept regardless.
+  const postsOnlyEvents = useMemo(
+    () => postEvents.filter((ev) => ev.kind !== 1 || !ev.tags.some(([t]) => t === 'e')),
+    [postEvents],
+  );
+  const postsOnlyPages = useMemo(
+    () => (postsOnlyEvents.length > 0 ? [postsOnlyEvents] : []),
+    [postsOnlyEvents],
+  );
+
   const currentFeedLoading = activeTab === 'posts' ? postsLoading : repliesLoading;
-  const totalEvents = activeTab === 'posts' ? postEvents.length : replyEvents.length;
+  const totalEvents = activeTab === 'posts' ? postsOnlyEvents.length : replyEvents.length;
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -346,10 +357,11 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
         value={activeTab}
         onValueChange={(v) => setActiveTab(v as ProfileTab)}
       >
-        {/* Tab bar + view-mode switcher */}
+        {/* Tab bar + view-mode switcher (two-row sticky header) */}
         <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border">
-          <div className="px-4 flex items-center justify-between gap-2">
-            <TabsList className="h-auto bg-transparent p-0 gap-0 flex-1">
+          {/* Row 1: tabs */}
+          <div className="px-4">
+            <TabsList className="h-auto bg-transparent p-0 gap-0 w-full justify-start">
               <TabsTrigger
                 value="posts"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-3 text-sm font-medium text-muted-foreground data-[state=active]:text-foreground transition-colors"
@@ -369,23 +381,24 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
                 Following
               </TabsTrigger>
             </TabsList>
-
-            {activeTab !== 'following' && (
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <ViewModeSwitcher mode={mode} onChange={(m) => setFeedViewMode(feedKey, m)} />
-                {!currentFeedLoading && totalEvents > 0 && (
-                  <Badge variant="secondary" className="text-[10px] px-1.5 h-4">
-                    {totalEvents}
-                  </Badge>
-                )}
-              </div>
-            )}
           </div>
+
+          {/* Row 2: view-mode switcher (only for feed tabs) */}
+          {activeTab !== 'following' && (
+            <div className="px-4 py-1.5 flex items-center gap-2 border-t border-border/50">
+              <ViewModeSwitcher mode={mode} onChange={(m) => setFeedViewMode(feedKey, m)} />
+              {!currentFeedLoading && totalEvents > 0 && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 h-4">
+                  {totalEvents}
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
 
         <TabsContent value="posts" className="mt-0">
           <FeedView
-            pages={postPages}
+            pages={postsOnlyPages}
             mode={mode}
             isLoading={postsLoading}
             hasNextPage={postsHasMore}
