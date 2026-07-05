@@ -17,17 +17,32 @@ export interface MuteList {
   pubkeys: Set<string>;
   /** Muted keywords (lowercased) */
   keywords: string[];
+  /** Muted hashtags from other clients' `t` tags (lowercased, without #) */
+  hashtags: string[];
   /** Muted list addresses ("kind:pubkey:d-tag") — expanded to pubkeys separately */
   lists: string[];
 }
 
 function parseMuteEvent(event: NostrEvent | undefined): MuteList {
-  if (!event) return { pubkeys: new Set(), keywords: [], lists: [] };
+  if (!event) return { pubkeys: new Set(), keywords: [], hashtags: [], lists: [] };
+  const keywords = event.tags
+    .filter(([t]) => t === 'word')
+    .map(([, v]) => v.toLowerCase())
+    .filter(Boolean);
+  const hashtags = Array.from(
+    new Set(
+      event.tags
+        .filter(([t]) => t === 't')
+        .map(([, v]) => v.toLowerCase())
+        .filter(Boolean),
+    ),
+  );
   return {
     pubkeys: new Set(
       event.tags.filter(([t]) => t === 'p').map(([, v]) => v).filter(Boolean),
     ),
-    keywords: event.tags.filter(([t]) => t === 'word').map(([, v]) => v.toLowerCase()).filter(Boolean),
+    keywords,
+    hashtags,
     lists: event.tags.filter(([t]) => t === 'a').map(([, v]) => v).filter(Boolean),
   };
 }
@@ -182,10 +197,20 @@ export function useMuteList() {
       if (muted.pubkeys.has(event.pubkey)) return true;
       if (blockListPubkeys.has(event.pubkey)) return true;
 
-      // Muted keyword in content
-      if (muted.keywords.length > 0) {
+      // Muted keyword / hashtag in content
+      const blockedTerms = muted.keywords.concat(muted.hashtags);
+      if (blockedTerms.length > 0) {
         const contentLower = event.content.toLowerCase();
-        if (muted.keywords.some((kw) => contentLower.includes(kw))) return true;
+        if (blockedTerms.some((kw) => contentLower.includes(kw))) return true;
+      }
+
+      // Muted hashtag via `t` tags (used by some other clients)
+      if (muted.hashtags.length > 0) {
+        for (const tag of event.tags) {
+          if (tag[0] === 't' && tag[1] && muted.hashtags.includes(tag[1].toLowerCase())) {
+            return true;
+          }
+        }
       }
 
       // Web of trust

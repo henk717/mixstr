@@ -208,14 +208,20 @@ function BlockSettings() {
   const { muted, blockListPubkeys } = useMuteList();
   const { spamSettings, setSpamSettings } = useMixstr();
 
-  const remote = useMemo(
-    () => ({
+  // Merge remote word mutes and hashtag (`t` tag) mutes into one editable list.
+  // Hashtags are shown with a # prefix so users can tell where they came from.
+  const remote = useMemo(() => {
+    const keywordSet = new Set(muted.keywords.map((k) => k.toLowerCase()));
+    const merged: string[] = [...muted.keywords];
+    for (const h of muted.hashtags) {
+      if (!keywordSet.has(h)) merged.push(`#${h}`);
+    }
+    return {
       pubkeys: Array.from(muted.pubkeys),
-      keywords: muted.keywords,
+      keywords: merged,
       lists: muted.lists,
-    }),
-    [muted],
-  );
+    };
+  }, [muted]);
 
   const [pubkeys, setPubkeys] = useState<string[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
@@ -235,7 +241,7 @@ function BlockSettings() {
   }, [synced, remote]);
 
   const addKeyword = () => {
-    const kw = keywordInput.trim();
+    const kw = keywordInput.trim().toLowerCase();
     if (kw && !keywords.includes(kw)) setKeywords((prev) => [...prev, kw]);
     setKeywordInput('');
   };
@@ -260,11 +266,26 @@ function BlockSettings() {
 
   const handleSave = async () => {
     if (!user) return;
-    const tags: string[][] = [
-      ...pubkeys.map((pk) => ['p', pk]),
-      ...keywords.map((kw) => ['word', kw]),
-      ...lists.map((l) => ['a', l]),
-    ];
+
+    const plainKeywords = keywords.filter((k) => !k.startsWith('#'));
+    const hashtags = keywords.filter((k) => k.startsWith('#')).map((k) => k.slice(1));
+
+    // Deduplicate tags before publishing.
+    const tagSet = new Set<string>();
+    const addTag = (tag: string[]) => {
+      tagSet.add(JSON.stringify(tag));
+    };
+
+    for (const pk of pubkeys) addTag(['p', pk]);
+    for (const kw of plainKeywords) addTag(['word', kw]);
+    for (const h of hashtags) {
+      addTag(['t', h]); // hashtag mute for clients that support `t` tags
+      addTag(['word', h]); // hybrid fallback for clients that only understand word mutes
+    }
+    for (const l of lists) addTag(['a', l]);
+
+    const tags = Array.from(tagSet).map((s) => JSON.parse(s) as string[]);
+
     try {
       await publish({ kind: 10000, content: '', tags });
       queryClient.invalidateQueries({ queryKey: ['nostr', 'mute-list', user.pubkey] });
@@ -326,7 +347,8 @@ function BlockSettings() {
         <CardHeader>
           <CardTitle className="text-base">Blocked Keywords</CardTitle>
           <CardDescription className="text-xs">
-            Posts containing these words will be hidden. Compatible with Amethyst's word mute list.
+            Posts containing these words or hashtags will be hidden. Start an entry with # to block a
+            hashtag (saved as both a `t` tag and a `word` tag so other clients understand it too).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -350,7 +372,7 @@ function BlockSettings() {
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
-              placeholder="Add keyword to block…"
+              placeholder="Add keyword or #hashtag to block…"
               className="h-8 text-sm flex-1"
             />
             <Button size="sm" variant="outline" onClick={addKeyword} className="h-8">
@@ -358,7 +380,8 @@ function BlockSettings() {
             </Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Case-insensitive. Amethyst and other clients will also respect these.
+            Case-insensitive. Entries starting with # are published as hashtag mutes (`t` tags) and
+            also as word mutes so Amethyst-style clients block them too.
           </p>
         </CardContent>
       </Card>
