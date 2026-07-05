@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmojifiedText } from '@/components/CustomEmoji';
 import { NoteContent } from '@/components/NoteContent';
+import { Lightbox } from '@/components/ImageGallery';
 import { Link } from 'react-router-dom';
 import {
   Globe,
@@ -157,6 +158,7 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
   const { data: isVerified } = useNip05Verification(meta?.nip05, pubkey);
 
   const [activeTab, setActiveTab] = useState<ProfileTab>('posts');
+  const [avatarLightboxOpen, setAvatarLightboxOpen] = useState(false);
 
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || pubkey.slice(0, 16) + '…';
@@ -243,12 +245,28 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
 
         {/* Avatar + action row */}
         <div className="px-4 -mt-12 flex items-end justify-between">
-          <Avatar className="w-24 h-24 border-4 border-background shadow-md">
-            <AvatarImage src={meta?.picture} />
-            <AvatarFallback className="bg-primary/20 text-primary text-3xl font-black">
-              {author.isLoading ? '?' : displayName[0]?.toUpperCase() ?? '?'}
-            </AvatarFallback>
-          </Avatar>
+          {meta?.picture ? (
+            <button
+              type="button"
+              onClick={() => setAvatarLightboxOpen(true)}
+              className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+              aria-label="View full avatar"
+            >
+              <Avatar className="w-24 h-24 border-4 border-background shadow-md cursor-pointer hover:opacity-90 transition-opacity">
+                <AvatarImage src={meta.picture} />
+                <AvatarFallback className="bg-primary/20 text-primary text-3xl font-black">
+                  {author.isLoading ? '?' : displayName[0]?.toUpperCase() ?? '?'}
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          ) : (
+            <Avatar className="w-24 h-24 border-4 border-background shadow-md">
+              <AvatarImage src={meta?.picture} />
+              <AvatarFallback className="bg-primary/20 text-primary text-3xl font-black">
+                {author.isLoading ? '?' : displayName[0]?.toUpperCase() ?? '?'}
+              </AvatarFallback>
+            </Avatar>
+          )}
 
           {!isOwnProfile && user && (
             <Button
@@ -275,6 +293,14 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
           )}
         </div>
       </div>
+
+      {meta?.picture && avatarLightboxOpen && (
+        <Lightbox
+          images={[meta.picture]}
+          currentIndex={0}
+          onClose={() => setAvatarLightboxOpen(false)}
+        />
+      )}
 
       {/* Profile info */}
       <div className="px-4 pt-3 pb-4 border-b border-border space-y-2">
