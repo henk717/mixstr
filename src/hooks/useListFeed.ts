@@ -103,7 +103,10 @@ export function useListFeed(list: SidebarList) {
     communitySources.map((s) => s.communityId!),
   );
 
-  const { data: dvmEvents = [] } = useQuery<NostrEvent[]>({
+  const {
+    data: dvmEvents = [],
+    isLoading: isLoadingDvm,
+  } = useQuery<NostrEvent[]>({
     queryKey: ['nostr', 'list-dvm-results', list.id, dvmSources.map((s) => s.dvmPubkey).join(','), user?.pubkey ?? ''],
     queryFn: async ({ signal }) => {
       if (dvmSources.length === 0) return [];
@@ -128,7 +131,7 @@ export function useListFeed(list: SidebarList) {
     staleTime: 0,
   });
 
-  return useInfiniteQuery<NostrEvent[]>({
+  const feedQuery = useInfiniteQuery<NostrEvent[]>({
     queryKey: ['nostr', 'list-feed-infinite', list.id, list.sources.map((s) => s.id).join(','), dvmEvents.length, communityMetas],
     queryFn: async ({ pageParam, signal }) => {
       const until = pageParam as number | undefined;
@@ -167,6 +170,8 @@ export function useListFeed(list: SidebarList) {
     enabled: list.sources.length > 0,
     staleTime: 30 * 1000,
   });
+
+  return { ...feedQuery, isLoadingDvm };
 }
 
 async function fetchSource(

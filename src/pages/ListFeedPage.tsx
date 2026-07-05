@@ -71,6 +71,7 @@ export function ListFeedPage() {
     hasNextPage,
     fetchNextPage,
     refetch: refetchNostr,
+    isLoadingDvm,
   } = useListFeed(list ?? { id: '', label: '', icon: 'hash', sources: [], createdAt: 0 });
 
   const rssSources = useMemo(
@@ -117,7 +118,7 @@ export function ListFeedPage() {
     return set;
   }, [allNostrEvents]);
 
-  const isLoading = nostrLoading || (hasRssSources && rssLoading);
+  const isLoading = nostrLoading || isLoadingDvm || (hasRssSources && rssLoading);
 
   const moderation = useMemo(() => {
     if (!user?.pubkey || moderatorCommunities.size === 0) return undefined;
@@ -330,7 +331,7 @@ export function ListFeedPage() {
         <FeedView
           pages={nostrPages}
           mode={mode}
-          isLoading={nostrLoading}
+          isLoading={nostrLoading || isLoadingDvm}
           hasNextPage={hasNextPage}
           isFetchingNextPage={isFetchingNextPage}
           fetchNextPage={fetchNextPage}
