@@ -150,19 +150,34 @@ export function FeedView({
       {/* Regular content */}
       {mode === 'media' && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4">
-          {regularEvents.map((event) => (
-            <MediaCard key={event.id} event={event} />
-          ))}
+          {regularEvents.map((event) =>
+            isLivestream(event) ? (
+              // Livestreams get a full-width slot in the grid (span 2 cols on small, 3 on md)
+              <div key={event.id} className="col-span-2 md:col-span-3">
+                <LivestreamCard event={event} />
+              </div>
+            ) : (
+              <MediaCard key={event.id} event={event} />
+            ),
+          )}
         </div>
       )}
 
-      {mode === 'audio' && regularEvents.map((event) => (
-        <AudioCard key={event.id} event={event} />
-      ))}
+      {mode === 'audio' && regularEvents.map((event) =>
+        isLivestream(event) ? (
+          <LivestreamCard key={event.id} event={event} />
+        ) : (
+          <AudioCard key={event.id} event={event} />
+        ),
+      )}
 
-      {mode === 'longform' && regularEvents.map((event) => (
-        <LongPostCard key={event.id} event={event} />
-      ))}
+      {mode === 'longform' && regularEvents.map((event) =>
+        isLivestream(event) ? (
+          <LivestreamCard key={event.id} event={event} />
+        ) : (
+          <LongPostCard key={event.id} event={event} />
+        ),
+      )}
 
       {(mode === 'short' || (mode !== 'media' && mode !== 'audio' && mode !== 'longform')) &&
         regularEvents.map((event) =>
