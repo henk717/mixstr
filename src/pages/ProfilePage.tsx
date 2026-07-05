@@ -1,18 +1,15 @@
 import { useMemo } from 'react';
 import { useSeoMeta } from '@unhead/react';
-import { useNostr } from '@nostrify/react';
-import { useInfiniteQuery } from '@tanstack/react-query';
-import type { NostrEvent } from '@nostrify/nostrify';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useMixstr } from '@/hooks/useMixstr';
+import { useProfileFeed } from '@/hooks/useProfileFeed';
 import { FeedView } from '@/components/feed/FeedView';
 import { ViewModeSwitcher } from '@/components/feed/ViewModeSwitcher';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Globe } from 'lucide-react';
-
-const PAGE_SIZE = 30;
+import { Badge } from '@/components/ui/badge';
+import { Globe, RefreshCw } from 'lucide-react';
 
 interface ProfilePageProps {
   pubkey: string;
@@ -21,7 +18,6 @@ interface ProfilePageProps {
 export function ProfilePage({ pubkey }: ProfilePageProps) {
   const author = useAuthor(pubkey);
   const meta = author.data?.metadata;
-  const { nostr } = useNostr();
   const { feedViewModes, setFeedViewMode } = useMixstr();
   const feedKey = `profile:${pubkey}`;
   const mode = feedViewModes[feedKey] ?? 'short';
@@ -32,30 +28,15 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
   useSeoMeta({ title: `${displayName} · Mixstr` });
 
   const {
-    data,
+    events,
     isLoading: feedLoading,
-    isFetchingNextPage,
-    hasNextPage,
+    isFetchingOlder,
+    hasMore,
     fetchNextPage,
-  } = useInfiniteQuery<NostrEvent[]>({
-    queryKey: ['nostr', 'profile-feed-infinite', pubkey],
-    queryFn: async ({ pageParam, signal }) => {
-      const until = pageParam as number | undefined;
-      const timeFilter = until ? { until } : {};
-      return nostr.query(
-        [{ kinds: [1, 6, 20, 30023, 30311, 31337, 34235], authors: [pubkey], limit: PAGE_SIZE, ...timeFilter }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
-      );
-    },
-    getNextPageParam: (lastPage) => {
-      if (lastPage.length < PAGE_SIZE) return undefined;
-      return lastPage[lastPage.length - 1].created_at - 1;
-    },
-    initialPageParam: undefined as number | undefined,
-    staleTime: 60 * 1000,
-  });
+  } = useProfileFeed(pubkey);
 
-  const pages = useMemo(() => data?.pages ?? [], [data]);
+  // Wrap into pages[] shape that FeedView expects
+  const pages = useMemo(() => (events.length > 0 ? [events] : []), [events]);
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -122,10 +103,22 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
         )}
       </div>
 
-      {/* Feed */}
+      {/* Feed toolbar */}
       <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border">
-        <div className="px-4 py-2">
+        <div className="px-4 py-2 flex items-center gap-2">
           <ViewModeSwitcher mode={mode} onChange={(m) => setFeedViewMode(feedKey, m)} />
+          {/* Live poll indicator */}
+          {!feedLoading && (
+            <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground select-none">
+              <RefreshCw size={10} className="animate-spin opacity-60" />
+              <span>Live</span>
+              {events.length > 0 && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 h-4">
+                  {events.length}
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -133,8 +126,8 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
         pages={pages}
         mode={mode}
         isLoading={feedLoading}
-        hasNextPage={hasNextPage}
-        isFetchingNextPage={isFetchingNextPage}
+        hasNextPage={hasMore}
+        isFetchingNextPage={isFetchingOlder}
         fetchNextPage={fetchNextPage}
       />
     </div>

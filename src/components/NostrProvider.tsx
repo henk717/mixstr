@@ -4,9 +4,23 @@ import { NostrContext } from '@nostrify/react';
 import { NUser, useNostrLogin } from '@nostrify/react/login';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppContext } from '@/hooks/useAppContext';
+import { useRelayGossip, getGossipRelays } from '@/hooks/useRelayGossip';
 
 interface NostrProviderProps {
   children: React.ReactNode;
+}
+
+/**
+ * RelayGossipSync — mounted inside the NostrContext.Provider so it can call
+ * useNostr() without violating the "must be within a NostrProvider" rule.
+ * It drives the gossip relay scanning and updates the pool's gossipRelaysRef.
+ */
+function RelayGossipSync({ gossipRelaysRef }: { gossipRelaysRef: React.RefObject<string[]> }) {
+  useRelayGossip((relays) => {
+    gossipRelaysRef.current = relays;
+    console.log(`[RelayGossip] Updated gossip relays (${relays.length}):`, relays.slice(0, 5).join(', ') + (relays.length > 5 ? '…' : ''));
+  });
+  return null;
 }
 
 const NostrProvider: React.FC<NostrProviderProps> = (props) => {
@@ -20,6 +34,10 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   // recreating the pool. The refs are written from effects (never during
   // render) to satisfy React's purity rules.
   const relayMetadataRef = useRef(config.relayMetadata);
+
+  // Gossip relays (top-N from NIP-65 scanning) — stored in a ref so the
+  // reqRouter closure always reads the latest list without recreating the pool.
+  const gossipRelaysRef = useRef<string[]>(getGossipRelays());
 
   // Stable ref to the current user's signer for NIP-42 AUTH.
   // The `open()` callback reads from this ref when a relay sends an AUTH
@@ -73,6 +91,14 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
         'wss://relay.ditto.pub',    // general purpose
       ];
       for (const url of FALLBACK_READ_RELAYS) {
+        if (!routes.has(url)) {
+          routes.set(url, filters);
+        }
+      }
+
+      // Add gossip relays discovered via NIP-65 scanning of encountered profiles.
+      // These are the top-N most-popular relays across everyone we've seen.
+      for (const url of gossipRelaysRef.current) {
         if (!routes.has(url)) {
           routes.set(url, filters);
         }
@@ -135,6 +161,9 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
 
   return (
     <NostrContext.Provider value={contextValue}>
+      {/* RelayGossipSync is a child of NostrContext.Provider so it can safely
+          call useNostr() without the "must be within a NostrProvider" error. */}
+      <RelayGossipSync gossipRelaysRef={gossipRelaysRef} />
       {children}
     </NostrContext.Provider>
   );

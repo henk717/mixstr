@@ -1,6 +1,7 @@
 import { useNostr } from '@nostrify/react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
+import { NRelay1 } from '@nostrify/nostrify';
 import { useFollowing } from './useFollowing';
 import { useCurrentUser } from './useCurrentUser';
 import type { SidebarList, ListSource } from '@/lib/sidebarLists';
@@ -268,6 +269,22 @@ async function fetchSource(
         ? dvmEvents.filter((e) => e.created_at < until)
         : dvmEvents;
       return filtered.slice(0, limit);
+    }
+
+    case 'relay': {
+      // Single-relay feed — connect directly to the specified relay URL and
+      // query its global feed without routing through the NPool.
+      if (!source.relayUrl) return [];
+      const relay = new NRelay1(source.relayUrl);
+      try {
+        return await relay.query(
+          [{ kinds: [1, 6, 20, 30023], limit, ...timeFilter }],
+          { signal: AbortSignal.any([abort, AbortSignal.timeout(10_000)]) },
+        );
+      } finally {
+        // NRelay1 doesn't have an explicit close API, connections are managed
+        // by the pool internally — we just let it GC.
+      }
     }
 
     case 'rss':

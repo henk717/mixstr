@@ -14,7 +14,8 @@ export type SourceType =
   | 'group'         // NIP-29 relay-based group
   | 'livestream'    // NIP-53 livestreams (kind 30311)
   | 'rss'           // External RSS/Atom feed via proxy
-  | 'fediverse';    // ActivityPub actor feed via proxy
+  | 'fediverse'     // ActivityPub actor feed via proxy
+  | 'relay';        // Single relay global feed
 
 export interface ListSource {
   id: string;
@@ -43,6 +44,9 @@ export interface ListSource {
 
   // rss / fediverse
   url?: string;
+
+  // relay
+  relayUrl?: string;
 }
 
 export type SidebarListIcon =
@@ -154,6 +158,7 @@ export function sourceDescription(source: ListSource): string {
     case 'livestream': return source.pubkeys?.length ? `Livestreams (${source.pubkeys.length} authors)` : 'All livestreams';
     case 'rss': return `RSS: ${source.url ?? '?'}`;
     case 'fediverse': return `Fediverse: ${source.url ?? '?'}`;
+    case 'relay': return `Relay: ${source.relayUrl ? source.relayUrl.replace(/^wss?:\/\//, '') : '?'}`;
     default: return 'Unknown';
   }
 }

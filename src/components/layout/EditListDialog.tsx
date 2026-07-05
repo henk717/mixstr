@@ -86,6 +86,7 @@ const SOURCE_TYPES: { value: SourceType; label: string; description: string }[] 
   { value: 'community', label: 'Community (NIP-72)', description: 'Reddit-style Nostr community' },
   { value: 'group', label: 'Group (NIP-29)', description: 'Relay-based closed group' },
   { value: 'livestream', label: 'Livestreams', description: 'NIP-53 live streams (kind 30311)' },
+  { value: 'relay', label: 'Single Relay', description: 'Global feed from one specific relay' },
   { value: 'rss', label: 'RSS / Atom Feed', description: 'External blog or news feed' },
   { value: 'fediverse', label: 'Fediverse Actor', description: 'ActivityPub user feed (via proxy)' },
 ];
@@ -471,6 +472,25 @@ function SourceEditor({
           <p className="text-xs text-muted-foreground flex items-center gap-1">
             <Wifi size={11} />
             Shows NIP-53 live streams. Leave authors empty to see all.
+          </p>
+        </div>
+      )}
+
+      {source.type === 'relay' && (
+        <div className="space-y-2">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Relay WebSocket URL</Label>
+            <Input
+              value={source.relayUrl ?? ''}
+              onChange={(e) => onChange({ ...source, relayUrl: e.target.value.trim() })}
+              placeholder="wss://relay.example.com"
+              className="h-7 text-xs bg-background"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground flex items-center gap-1">
+            <Wifi size={11} />
+            Connects directly to this relay and shows its global kind-1 feed.
+            Great for niche community relays.
           </p>
         </div>
       )}
