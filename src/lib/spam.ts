@@ -26,10 +26,10 @@ export interface SpamSettings {
 }
 
 export const DEFAULT_SPAM_SETTINGS: SpamSettings = {
-  webOfTrust: { enabled: false, windowDays: 30 },
-  hashtag: { enabled: false, maxTags: 10 },
-  speed: { enabled: false, maxEvents: 10, windowMinutes: 5 },
-  readability: { enabled: false, minBase64Length: 80 },
+  webOfTrust: { enabled: true, windowDays: 30 },
+  hashtag: { enabled: true, maxTags: 5 },
+  speed: { enabled: true, maxEvents: 10, windowMinutes: 1 },
+  readability: { enabled: true, minBase64Length: 0 },
 };
 
 const STORAGE_KEY = 'mixstr:spam-settings';
@@ -106,7 +106,7 @@ export function looksLikeJson(content: string): boolean {
 }
 
 export function looksLikeBase64(content: string, minLength: number): boolean {
-  if (content.length < minLength) return false;
+  if (minLength > 0 && content.length < minLength) return false;
   if (/\s/.test(content)) return false;
   if (content.length % 4 !== 0) return false;
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(content)) return false;

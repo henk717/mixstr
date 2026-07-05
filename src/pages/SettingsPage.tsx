@@ -59,7 +59,7 @@ function PeoplePicker({
   const [search, setSearch] = useState('');
   const [manualInput, setManualInput] = useState('');
 
-  const { data: metaMap = {} } = useQuery<Record<string, NostrMetadata>>({
+  const { data: followMetaMap = {} } = useQuery<Record<string, NostrMetadata>>({
     queryKey: ['nostr', 'follow-meta-batch', followingHex.slice(0, 150).join(',')],
     queryFn: async ({ signal }) => {
       if (!followingHex.length) return {};
@@ -76,6 +76,28 @@ function PeoplePicker({
     enabled: followingHex.length > 0,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Also resolve metadata for currently blocked users so the chips show names
+  // even when the blocked person isn't in your follow list.
+  const { data: blockedMetaMap = {} } = useQuery<Record<string, NostrMetadata>>({
+    queryKey: ['nostr', 'blocked-meta-batch', pubkeys.slice(0, 150).join(',')],
+    queryFn: async ({ signal }) => {
+      if (!pubkeys.length) return {};
+      const events = await nostr.query(
+        [{ kinds: [0], authors: pubkeys.slice(0, 150), limit: 150 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
+      );
+      const map: Record<string, NostrMetadata> = {};
+      for (const ev of events) {
+        try { map[ev.pubkey] = JSON.parse(ev.content) as NostrMetadata; } catch {}
+      }
+      return map;
+    },
+    enabled: pubkeys.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const metaMap = useMemo(() => ({ ...followMetaMap, ...blockedMetaMap }), [followMetaMap, blockedMetaMap]);
 
   const suggestions = useMemo(() => {
     const q = search.toLowerCase();
@@ -552,25 +574,6 @@ function BlockSettings() {
               updateSpam({ readability: { ...spamSettings.readability, enabled: checked } })
             }
           />
-          {spamSettings.readability.enabled && (
-            <div className="flex items-center gap-2 pb-3">
-              <Label className="text-xs text-muted-foreground whitespace-nowrap">Min base64 length</Label>
-              <Input
-                type="number"
-                min={20}
-                max={500}
-                value={spamSettings.readability.minBase64Length}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  if (!Number.isNaN(v) && v > 0) {
-                    updateSpam({ readability: { ...spamSettings.readability, minBase64Length: v } });
-                  }
-                }}
-                className="h-7 text-sm w-20"
-              />
-              <span className="text-xs text-muted-foreground">chars</span>
-            </div>
-          )}
         </CardContent>
       </Card>
 
