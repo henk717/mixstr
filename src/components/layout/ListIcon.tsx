@@ -17,6 +17,7 @@ import {
   Flame,
   Building2,
   MessageSquare,
+  Tv2,
 } from 'lucide-react';
 import type { SidebarListIcon } from '@/lib/sidebarLists';
 
@@ -26,7 +27,7 @@ interface ListIconProps {
   className?: string;
 }
 
-const ICON_MAP: Record<SidebarListIcon, React.ElementType> = {
+export const ICON_MAP: Record<SidebarListIcon, React.ElementType> = {
   home: Home,
   hash: Hash,
   zap: Zap,
@@ -45,9 +46,10 @@ const ICON_MAP: Record<SidebarListIcon, React.ElementType> = {
   lightning: Flame,
   community: Building2,
   group: MessageSquare,
+  live: Tv2,
 };
 
 export function ListIcon({ icon, size = 16, className }: ListIconProps) {
-  const Icon = ICON_MAP[icon] ?? Hash;
+  const Icon = ICON_MAP[icon as SidebarListIcon] ?? Hash;
   return <Icon size={size} className={className} />;
 }

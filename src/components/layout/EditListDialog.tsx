@@ -40,6 +40,37 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { ListIcon } from './ListIcon';
 
+// Visual icon grid picker — shows the actual icon component for each option
+function IconPicker({ value, onChange }: { value: SidebarListIcon; onChange: (v: SidebarListIcon) => void }) {
+  return (
+    <div>
+      <Label className="text-sm">Icon</Label>
+      <div className="mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(40px,1fr))] gap-1.5">
+        {ICON_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            title={opt.label}
+            onClick={() => onChange(opt.value)}
+            className={cn(
+              'flex items-center justify-center w-10 h-10 rounded-lg border transition-all',
+              value === opt.value
+                ? 'border-primary bg-primary/15 text-primary shadow-sm'
+                : 'border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-foreground hover:bg-accent',
+            )}
+          >
+            <ListIcon icon={opt.value} size={16} />
+          </button>
+        ))}
+      </div>
+      {/* Show selected label underneath */}
+      <p className="text-xs text-muted-foreground mt-1.5">
+        Selected: <span className="text-foreground font-medium">{ICON_OPTIONS.find(o => o.value === value)?.label ?? value}</span>
+      </p>
+    </div>
+  );
+}
+
 interface EditListDialogProps {
   open: boolean;
   onClose: () => void;
@@ -528,41 +559,20 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Name + Icon row */}
-          <div className="flex items-end gap-3">
-            <div className="flex-1 space-y-1.5">
-              <Label>List Name</Label>
-              <Input
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="My Feed"
-                className="bg-background"
-                autoFocus
-              />
-            </div>
-            <div className="w-32 space-y-1.5">
-              <Label>Icon</Label>
-              <Select value={icon} onValueChange={(v) => setIcon(v as SidebarListIcon)}>
-                <SelectTrigger className="bg-background">
-                  <SelectValue>
-                    <span className="flex items-center gap-2">
-                      <ListIcon icon={icon} size={14} className="text-primary" />
-                      <span className="text-xs">
-                        {ICON_OPTIONS.find((o) => o.value === icon)?.label.split(' ').slice(1).join(' ')}
-                      </span>
-                    </span>
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  {ICON_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value} className="text-xs">
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Name */}
+          <div className="space-y-1.5">
+            <Label>List Name</Label>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="My Feed"
+              className="bg-background"
+              autoFocus
+            />
           </div>
+
+          {/* Icon picker */}
+          <IconPicker value={icon} onChange={setIcon} />
 
           {/* Sources */}
           <div className="space-y-2">
@@ -688,7 +698,7 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
           </Button>
           <Button
             onClick={handleSave}
-            disabled={!label.trim() || sources.length === 0}
+            disabled={!label.trim() || (!initial && sources.length === 0)}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {initial ? 'Save Changes' : 'Create List'}
