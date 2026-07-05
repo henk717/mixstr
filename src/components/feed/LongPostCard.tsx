@@ -154,7 +154,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
                     <p className="text-sm text-muted-foreground">{summary}</p>
                   )}
                   <NoteContent
-                    event={event}
+                    event={displayEvent}
                     className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
                     inlineExternalEmbeds
                   />
@@ -194,7 +194,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
                 also try to render them, which would cause duplicates.
               */}
               <NoteContent
-                event={event}
+                event={displayEvent}
                 className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
                 disableMediaEmbeds
                 inlineExternalEmbeds
