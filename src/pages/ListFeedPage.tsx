@@ -1,22 +1,34 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useSeoMeta } from '@unhead/react';
-import { RefreshCw, Pencil, CloudOff } from 'lucide-react';
+import { RefreshCw, Pencil } from 'lucide-react';
 import { useMixstr } from '@/hooks/useMixstr';
 import { useListFeed } from '@/hooks/useListFeed';
+import { useRssFeed } from '@/hooks/useRssFeed';
+import { useMuteList } from '@/hooks/useMuteList';
 import { FeedView } from '@/components/feed/FeedView';
+import { ShortPostCard } from '@/components/feed/ShortPostCard';
+import { RssItemCard } from '@/components/feed/RssItemCard';
 import { ViewModeSwitcher } from '@/components/feed/ViewModeSwitcher';
 import { ListIcon } from '@/components/layout/ListIcon';
 import { EditListDialog } from '@/components/layout/EditListDialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Card, CardContent } from '@/components/ui/card';
 import { sourceDescription } from '@/lib/sidebarLists';
-import { useState } from 'react';
+import type { RssItem } from '@/hooks/useRssFeed';
+import type { NostrEvent } from '@nostrify/nostrify';
+
+type MergedEntry =
+  | { type: 'nostr'; ts: number; event: NostrEvent }
+  | { type: 'rss'; ts: number; item: RssItem };
 
 export function ListFeedPage() {
   const { id } = useParams<{ id: string }>();
   const { sidebarLists, updateSidebarList, feedViewModes, setFeedViewMode } = useMixstr();
   const [editOpen, setEditOpen] = useState(false);
+  const { isMuted } = useMuteList();
 
   const list = sidebarLists.find((l) => l.id === id);
   const feedKey = `list:${id}`;
@@ -26,14 +38,56 @@ export function ListFeedPage() {
 
   const {
     data,
-    isLoading,
+    isLoading: nostrLoading,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
-    refetch,
+    refetch: refetchNostr,
   } = useListFeed(list ?? { id: '', label: '', icon: 'hash', sources: [], createdAt: 0 });
 
-  const pages = useMemo(() => data?.pages ?? [], [data]);
+  const rssSources = useMemo(
+    () => (list?.sources ?? []).filter((s) => s.type === 'rss' && s.url),
+    [list?.sources],
+  );
+  const hasRssSources = rssSources.length > 0;
+  const hasNostrSources = useMemo(
+    () => (list?.sources ?? []).some((s) => s.type !== 'rss' && s.type !== 'fediverse'),
+    [list?.sources],
+  );
+
+  const {
+    data: rssItems = [],
+    isLoading: rssLoading,
+    refetch: refetchRss,
+  } = useRssFeed(list?.sources ?? []);
+
+  const nostrPages = useMemo(() => data?.pages ?? [], [data]);
+  const allNostrEvents = useMemo(
+    () => nostrPages.flatMap((p) => (Array.isArray(p) ? p : [])),
+    [nostrPages],
+  );
+
+  const isLoading = nostrLoading || (hasRssSources && rssLoading);
+
+  function handleRefetch() {
+    void refetchNostr();
+    if (hasRssSources) void refetchRss();
+  }
+
+  // Build interleaved timeline for short mode when RSS sources exist
+  const mergedTimeline = useMemo<MergedEntry[]>(() => {
+    if (!hasRssSources || mode !== 'short') return [];
+
+    const entries: MergedEntry[] = [
+      ...allNostrEvents
+        .filter((e) => !isMuted(e))
+        .map((event) => ({ type: 'nostr' as const, ts: event.created_at, event })),
+      ...rssItems.map((item) => ({ type: 'rss' as const, ts: item.pubDate, item })),
+    ];
+    entries.sort((a, b) => b.ts - a.ts);
+    return entries;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRssSources, mode, allNostrEvents, rssItems]);
 
   if (!list) {
     return (
@@ -45,6 +99,8 @@ export function ListFeedPage() {
       </div>
     );
   }
+
+  const showMerged = hasRssSources && mode === 'short';
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -73,7 +129,8 @@ export function ListFeedPage() {
               variant="ghost"
               size="icon"
               className="w-8 h-8 text-muted-foreground hover:text-primary"
-              onClick={() => refetch()}
+              onClick={handleRefetch}
+              disabled={isLoading}
               title="Refresh"
             >
               <RefreshCw size={15} className={isLoading ? 'animate-spin' : ''} />
@@ -89,21 +146,86 @@ export function ListFeedPage() {
             </Button>
           </div>
         </div>
-        <div className="px-4 pb-3">
-          <ViewModeSwitcher mode={mode} onChange={(m) => setFeedViewMode(feedKey, m)} />
-        </div>
+
+        {/* View mode switcher — only useful when Nostr sources exist */}
+        {hasNostrSources && (
+          <div className="px-4 pb-3">
+            <ViewModeSwitcher mode={mode} onChange={(m) => setFeedViewMode(feedKey, m)} />
+          </div>
+        )}
       </div>
 
-      <FeedView
-        pages={pages}
-        mode={mode}
-        isLoading={isLoading}
-        hasNextPage={hasNextPage}
-        isFetchingNextPage={isFetchingNextPage}
-        fetchNextPage={fetchNextPage}
-        showLivestreamsAtTop={list.viewOptions?.showLivestreamsAtTop ?? false}
-        viewOptions={list.viewOptions}
-      />
+      {/* ── RSS-only list ── */}
+      {!hasNostrSources && hasRssSources && (
+        <>
+          {rssLoading && <RssSkeleton />}
+          {!rssLoading && rssItems.length === 0 && (
+            <Card className="border-dashed mx-4 my-8">
+              <CardContent className="py-12 px-8 text-center">
+                <p className="text-muted-foreground text-sm">
+                  No articles found. Check the RSS URL is correct and try refreshing.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+          {rssItems.map((item) => (
+            <RssItemCard key={item.id} item={item} />
+          ))}
+        </>
+      )}
+
+      {/* ── Mixed Nostr + RSS — interleaved in short mode ── */}
+      {hasNostrSources && showMerged && (
+        <>
+          {isLoading && mergedTimeline.length === 0 && <FeedSkeleton />}
+          {!isLoading && mergedTimeline.length === 0 && (
+            <Card className="border-dashed mx-4 my-8">
+              <CardContent className="py-12 px-8 text-center">
+                <p className="text-muted-foreground text-sm">No posts yet.</p>
+              </CardContent>
+            </Card>
+          )}
+          {mergedTimeline.map((entry) =>
+            entry.type === 'rss' ? (
+              <RssItemCard key={entry.item.id} item={entry.item} />
+            ) : (
+              <ShortPostCard key={entry.event.id} event={entry.event} />
+            ),
+          )}
+          {/* Infinite scroll sentinel for Nostr side */}
+          {(hasNextPage || isFetchingNextPage) && (
+            <div className="py-4 text-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={fetchNextPage}
+                disabled={isFetchingNextPage}
+                className="text-muted-foreground"
+              >
+                {isFetchingNextPage ? (
+                  <><RefreshCw size={13} className="animate-spin mr-2" />Loading…</>
+                ) : (
+                  'Load more'
+                )}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Nostr-only or non-short mode (media/audio/longform) ── */}
+      {hasNostrSources && !showMerged && (
+        <FeedView
+          pages={nostrPages}
+          mode={mode}
+          isLoading={nostrLoading}
+          hasNextPage={hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          fetchNextPage={fetchNextPage}
+          showLivestreamsAtTop={list.viewOptions?.showLivestreamsAtTop ?? false}
+          viewOptions={list.viewOptions}
+        />
+      )}
 
       <EditListDialog
         open={editOpen}
@@ -111,6 +233,43 @@ export function ListFeedPage() {
         initial={list}
         onSave={(updated) => updateSidebarList(list.id, updated)}
       />
+    </div>
+  );
+}
+
+function RssSkeleton() {
+  return (
+    <div>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="px-4 py-3 border-b border-border flex gap-3">
+          <Skeleton className="w-20 h-20 rounded-xl flex-shrink-0" />
+          <div className="flex-1 space-y-2 py-1">
+            <Skeleton className="h-3 w-3/4" />
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-2/3" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FeedSkeleton() {
+  return (
+    <div>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="px-4 py-4 border-b border-border space-y-3">
+          <div className="flex items-center gap-3">
+            <Skeleton className="w-10 h-10 rounded-full flex-shrink-0" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-3 w-32" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+          </div>
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-4/5" />
+        </div>
+      ))}
     </div>
   );
 }
