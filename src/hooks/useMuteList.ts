@@ -97,7 +97,7 @@ export function useMuteList() {
   const { data: followingHex = [] } = useFollowing();
   const { spamSettings } = useMixstr();
 
-  const { data: muted } = useQuery<MuteList>({
+  const { data: rawMuted } = useQuery<MuteList>({
     queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''],
     queryFn: async ({ signal }) => {
       if (!user?.pubkey) return { pubkeys: new Set(), keywords: [], hashtags: [], lists: [] };
@@ -133,7 +133,9 @@ export function useMuteList() {
 
       const results = await nostr.query(filters, {
         signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
-      });
+  });
+
+  const muted = rawMuted ?? { pubkeys: new Set<string>(), keywords: [], hashtags: [], lists: [] };
 
       const blocked = new Set<string>();
       for (const ev of results) {
