@@ -105,6 +105,22 @@ function storageKey(pubkey?: string): string {
   return pubkey ? `mixstr:sidebar-lists:${pubkey}` : LEGACY_STORAGE_KEY;
 }
 
+/** Timestamps used to be saved in milliseconds. Normalize to seconds. */
+function normalizeCreatedAt(ts?: number): number {
+  if (!ts || ts <= 0) return 0;
+  if (ts > 1e12) return Math.floor(ts / 1000);
+  return ts;
+}
+
+function normalizeSidebarList(list: SidebarList): SidebarList {
+  return { ...list, createdAt: normalizeCreatedAt(list.createdAt) };
+}
+
+/** Current Unix timestamp in seconds. New lists should use this. */
+export function listTimestamp(): number {
+  return Math.floor(Date.now() / 1000);
+}
+
 export function loadSidebarLists(pubkey?: string): SidebarList[] {
   try {
     // Try the namespaced key first
@@ -112,7 +128,10 @@ export function loadSidebarLists(pubkey?: string): SidebarList[] {
     const namespaced = localStorage.getItem(namespacedKey);
     if (namespaced) {
       const parsed = JSON.parse(namespaced) as SidebarList[];
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        const normalized = parsed.map(normalizeSidebarList);
+        return normalized;
+      }
     }
 
     // If logged-out / no pubkey, fall back to the anonymous/legacy store
@@ -120,7 +139,10 @@ export function loadSidebarLists(pubkey?: string): SidebarList[] {
       const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
       if (legacy) {
         const parsed = JSON.parse(legacy) as SidebarList[];
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) {
+          const normalized = parsed.map(normalizeSidebarList);
+          return normalized;
+        }
       }
     }
 
@@ -131,7 +153,7 @@ export function loadSidebarLists(pubkey?: string): SidebarList[] {
 }
 
 export function saveSidebarLists(lists: SidebarList[], pubkey?: string): void {
-  localStorage.setItem(storageKey(pubkey), JSON.stringify(lists));
+  localStorage.setItem(storageKey(pubkey), JSON.stringify(lists.map(normalizeSidebarList)));
 }
 
 export function createListId(): string {

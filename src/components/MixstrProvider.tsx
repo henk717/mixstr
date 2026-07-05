@@ -40,6 +40,9 @@ function MixstrSyncInner({
 export function MixstrProvider({ children }: { children: ReactNode }) {
   const { user } = useCurrentUser();
   const activePubkeyRef = useRef<string | undefined>(undefined);
+  // Tracks which account we have already merged remote config for, so a late
+  // local-load effect does not clobber the remote lists.
+  const remoteLoadedForPubkey = useRef<string | undefined>(undefined);
 
   const [feedViewModes, setFeedViewModes] = useState<Record<string, FeedViewMode>>({});
   const [sidebarLists, setSidebarListsState] = useState<SidebarList[]>(() =>
@@ -64,6 +67,12 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     if (newPubkey === activePubkeyRef.current) return;
 
     activePubkeyRef.current = newPubkey;
+
+    // If remote config was already merged for this account, don't overwrite it
+    // with the local copy (the remote may be newer).
+    if (newPubkey && newPubkey === remoteLoadedForPubkey.current) {
+      return;
+    }
 
     // Load the lists that belong to this account (or defaults if none stored)
     const lists = loadSidebarLists(newPubkey);
@@ -94,12 +103,20 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   // Called when the remote Nostr config is fetched and newer than local
   const handleRemoteLoaded = useCallback((config: MixstrConfig) => {
     setSidebarListsState((local) => {
-      // Only override if the remote savedAt is more recent than local createdAt heuristic
+      // Normalize local timestamps to seconds before comparing (legacy lists may be ms)
       const remoteTs = config.savedAt ?? 0;
-      const localMaxTs = Math.max(...local.map((l) => l.createdAt ?? 0), 0);
+      const localMaxTs = Math.max(
+        ...local.map((l) => (l.createdAt && l.createdAt > 1e12 ? Math.floor(l.createdAt / 1000) : l.createdAt ?? 0)),
+        0,
+      );
       if (remoteTs > localMaxTs) {
-        saveSidebarLists(config.sidebarLists, activePubkeyRef.current);
-        return config.sidebarLists;
+        const normalized = config.sidebarLists.map((l) => ({
+          ...l,
+          createdAt: l.createdAt && l.createdAt > 1e12 ? Math.floor(l.createdAt / 1000) : l.createdAt ?? 0,
+        }));
+        saveSidebarLists(normalized, activePubkeyRef.current);
+        remoteLoadedForPubkey.current = activePubkeyRef.current;
+        return normalized;
       }
       return local;
     });

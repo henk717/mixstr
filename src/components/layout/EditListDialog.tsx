@@ -37,6 +37,7 @@ import {
   type SourceType,
   ICON_OPTIONS,
   createSourceId,
+  listTimestamp,
 } from '@/lib/sidebarLists';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
@@ -949,7 +950,7 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
       icon,
       sources,
       pinned: initial?.pinned,
-      createdAt: initial?.createdAt ?? Date.now(),
+      createdAt: initial?.createdAt ?? listTimestamp(),
       viewOptions,
     });
     onClose();

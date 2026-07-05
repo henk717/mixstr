@@ -41,7 +41,7 @@ import { ListIcon } from './ListIcon';
 import { EditListDialog } from './EditListDialog';
 import AuthDialog from '@/components/auth/AuthDialog';
 import type { SidebarList } from '@/lib/sidebarLists';
-import { createListId } from '@/lib/sidebarLists';
+import { createListId, listTimestamp } from '@/lib/sidebarLists';
 import { nip19 } from 'nostr-tools';
 
 // The static navigation items always present at the top
@@ -425,7 +425,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           if (editDialog.list) {
             updateSidebarList(list.id, list);
           } else {
-            addSidebarList({ ...list, id: createListId(), createdAt: Date.now() });
+            addSidebarList({ ...list, id: createListId(), createdAt: listTimestamp() });
           }
         }}
       />
