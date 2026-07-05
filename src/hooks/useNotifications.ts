@@ -21,7 +21,9 @@ export function useNotifications() {
         ],
         { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
       );
-      return events.sort((a, b) => b.created_at - a.created_at);
+      // Filter out the user's own events (e.g. self-tags)
+      const filtered = events.filter((e) => e.pubkey !== user.pubkey);
+      return filtered.sort((a, b) => b.created_at - a.created_at);
     },
     enabled: !!user?.pubkey,
     staleTime: 30 * 1000,

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFollowing } from '@/hooks/useFollowing';
@@ -6,9 +6,10 @@ import { useFollowingFeed } from '@/hooks/useFollowingFeed';
 import { useMixstr } from '@/hooks/useMixstr';
 import { FeedView } from '@/components/feed/FeedView';
 import { ViewModeSwitcher } from '@/components/feed/ViewModeSwitcher';
+import { ComposeDialog } from '@/components/feed/ComposeDialog';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Feather, CloudOff } from 'lucide-react';
+import { RefreshCw, Feather, Pencil } from 'lucide-react';
 
 const FEED_KEY = 'home';
 
@@ -30,6 +31,9 @@ export function HomeFeed() {
   const mode = feedViewModes[FEED_KEY] ?? 'short';
   const pages = useMemo(() => data?.pages ?? [], [data]);
   const isLoading = followingLoading || feedLoading;
+  const isMobile = useIsMobile();
+
+  const [composeOpen, setComposeOpen] = useState(false);
 
   if (!user) {
     return (
@@ -48,28 +52,43 @@ export function HomeFeed() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto relative">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border">
         <div className="flex items-center justify-between px-4 py-3">
           <h1 className="text-lg font-bold text-foreground">Home</h1>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="w-8 h-8 text-muted-foreground hover:text-primary"
-            onClick={() => refetch()}
-            title="Refresh"
-          >
-            <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-          </Button>
+          <div className="flex items-center gap-1">
+            {/* New post button in header */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-8 h-8 text-primary hover:bg-primary/10"
+              onClick={() => setComposeOpen(true)}
+              title="New post"
+            >
+              <Pencil size={16} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="w-8 h-8 text-muted-foreground hover:text-primary"
+              onClick={() => refetch()}
+              title="Refresh"
+            >
+              <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+            </Button>
+          </div>
         </div>
         <div className="px-4 pb-3">
           <ViewModeSwitcher mode={mode} onChange={(m) => setFeedViewMode(FEED_KEY, m)} />
         </div>
       </div>
 
-      {/* Compose hint */}
-      <div className="px-4 py-3 border-b border-border flex items-center gap-3">
+      {/* Compose hint — clickable to open dialog */}
+      <div
+        className="px-4 py-3 border-b border-border flex items-center gap-3 cursor-pointer group"
+        onClick={() => setComposeOpen(true)}
+      >
         <div className="w-9 h-9 rounded-full overflow-hidden bg-primary/20 flex-shrink-0">
           {metadata?.picture ? (
             <img src={metadata.picture} alt="" className="w-full h-full object-cover" />
@@ -79,10 +98,16 @@ export function HomeFeed() {
             </div>
           )}
         </div>
-        <button className="flex-1 text-left text-muted-foreground text-sm py-2 px-3 rounded-full border border-border hover:border-primary/50 hover:text-foreground transition-colors">
+        <div className="flex-1 text-left text-muted-foreground text-sm py-2 px-3 rounded-full border border-border group-hover:border-primary/50 group-hover:text-foreground transition-colors bg-muted/30">
           What's on your mind?
-        </button>
-        <Button size="icon" variant="ghost" className="text-primary hover:bg-primary/10 w-8 h-8 rounded-full">
+        </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="text-primary hover:bg-primary/10 w-8 h-8 rounded-full flex-shrink-0"
+          onClick={(e) => { e.stopPropagation(); setComposeOpen(true); }}
+          title="New post"
+        >
           <Feather size={16} />
         </Button>
       </div>
@@ -102,6 +127,19 @@ export function HomeFeed() {
           You're not following anyone yet. Find people to follow to populate your feed.
         </div>
       )}
+
+      {/* Floating Action Button — Twitter-style new post (always visible) */}
+      <button
+        onClick={() => setComposeOpen(true)}
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/40 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform motion-reduce:transition-none"
+        title="New post"
+        aria-label="New post"
+      >
+        <Feather size={22} />
+      </button>
+
+      {/* Compose dialog */}
+      <ComposeDialog open={composeOpen} onClose={() => setComposeOpen(false)} />
     </div>
   );
 }

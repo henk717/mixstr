@@ -197,18 +197,18 @@ function BlockSettings() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: muteEvent, isLoading } = useQuery<NostrEvent | null>({
+  const { data: muteEvent, isLoading, isFetching } = useQuery<NostrEvent | null>({
     queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''],
     queryFn: async ({ signal }) => {
       if (!user?.pubkey) return null;
       const [ev] = await nostr.query(
         [{ kinds: [10000], authors: [user.pubkey], limit: 1 }],
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
       );
       return ev ?? null;
     },
     enabled: !!user?.pubkey,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0, // Always re-fetch to get latest from relays (important for Amethyst import)
   });
 
   const remote = useMemo(() => parseMuteEvent(muteEvent ?? undefined), [muteEvent]);
@@ -221,12 +221,18 @@ function BlockSettings() {
 
   // Sync remote → local once loaded
   const [synced, setSynced] = useState(false);
-  if (!synced && !isLoading && (muteEvent !== undefined)) {
+  if (!synced && !isLoading && muteEvent !== undefined) {
     setPubkeys(remote.pubkeys);
     setKeywords(remote.keywords);
     setLists(remote.lists);
     setSynced(true);
   }
+
+  const handleRefreshFromRelays = async () => {
+    setSynced(false);
+    await queryClient.invalidateQueries({ queryKey: ['nostr', 'mute-list', user?.pubkey ?? ''] });
+    toast({ title: 'Fetching from relays…', description: 'Your block list will update shortly.' });
+  };
 
   const addKeyword = () => {
     const kw = keywordInput.trim();
@@ -281,6 +287,36 @@ function BlockSettings() {
 
   return (
     <div className="space-y-6">
+      {/* Import banner */}
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="py-3 px-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Import from Relays</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isLoading || isFetching
+                ? 'Fetching your block list from Nostr relays…'
+                : muteEvent
+                  ? `Found ${remote.pubkeys.length} blocked people, ${remote.keywords.length} keywords on your relays (Amethyst-compatible).`
+                  : 'No existing block list found on relays.'}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRefreshFromRelays}
+            disabled={isLoading || isFetching}
+            className="flex-shrink-0"
+          >
+            {isFetching ? (
+              <RefreshCw size={12} className="animate-spin mr-1.5" />
+            ) : (
+              <RefreshCw size={12} className="mr-1.5" />
+            )}
+            Refresh
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Blocked People</CardTitle>
