@@ -44,6 +44,8 @@ interface FeedViewProps {
   viewOptions?: ListViewOptions;
   /** Optional community moderation controls. */
   moderation?: FeedModeration;
+  /** Message shown when the feed is empty. */
+  emptyMessage?: string;
 }
 
 function filterForMode(events: NostrEvent[], mode: FeedViewMode): NostrEvent[] {
@@ -87,6 +89,7 @@ export function FeedView({
   showLivestreamsAtTop = false,
   viewOptions,
   moderation,
+  emptyMessage,
 }: FeedViewProps) {
   const { isMuted } = useMuteList();
   const { spamSettings } = useMixstr();
@@ -158,7 +161,7 @@ export function FeedView({
         <CardContent className="py-12 px-8 text-center">
           <p className="text-muted-foreground max-w-sm mx-auto text-sm">
             {allEvents.length === 0
-              ? 'No posts yet. Follow some people or wait for content to load.'
+              ? (emptyMessage ?? 'No posts yet. Follow some people or wait for content to load.')
               : `No ${mode} content in your feed right now.`}
           </p>
         </CardContent>

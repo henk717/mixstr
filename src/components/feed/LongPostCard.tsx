@@ -7,6 +7,8 @@ import { Lightbox } from '@/components/ImageGallery';
 import { cn } from '@/lib/utils';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
+import { RssAuthorHeader } from './RssAuthorHeader';
+import { RssOpenRow } from './RssOpenRow';
 import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
 import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
@@ -23,6 +25,7 @@ import {
   hasMedia as eventHasMedia,
   tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
+import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useTopComments } from '@/hooks/useEventComments';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useParentEvent } from '@/hooks/useParentEvent';
@@ -71,6 +74,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const title = getEventTitle(displayEvent);
   const cover = getCoverImage(displayEvent);
   const summary = getSummary(displayEvent);
+  const isRss = isRssSyntheticEvent(displayEvent);
 
   const images = extractImages(displayEvent);
   const videos = extractVideos(displayEvent);
@@ -81,7 +85,14 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const isVeryLong = displayEvent.content.length > TEXT_ONLY_CLAMP;
   const shouldClampText = isVeryLong && !hasAnyMedia && !textExpanded;
 
-  const handleCardClick = () => navigate(`/${nevent}`);
+  const handleCardClick = () => {
+    if (isRss) {
+      const link = displayEvent.tags.find(([k]) => k === 'link')?.[1];
+      if (link) window.open(link, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    navigate(`/${nevent}`);
+  };
 
   return (
     <article
@@ -106,7 +117,11 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
       )}
 
       <div className="px-4 py-5">
-        <PostAuthor pubkey={displayEvent.pubkey} createdAt={displayEvent.created_at} />
+        {isRss ? (
+          <RssAuthorHeader event={displayEvent} />
+        ) : (
+          <PostAuthor pubkey={displayEvent.pubkey} createdAt={displayEvent.created_at} />
+        )}
 
         <div className="mt-3 space-y-3">
           {longform ? (
@@ -224,7 +239,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
         <CommentPreview eventId={displayEvent.id} nevent={nevent} />
 
         <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-          <PostActions event={displayEvent} />
+          {isRss ? <RssOpenRow event={displayEvent} /> : <PostActions event={displayEvent} />}
         </div>
 
         {moderation && (

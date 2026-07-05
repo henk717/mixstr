@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Play, Image, Plus, Wifi, CheckCircle } from 'lucide-react';
+import { Play, Image, Plus, Wifi, CheckCircle, Rss } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
@@ -16,6 +16,7 @@ import {
   getAudioTrackInfo,
   tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
+import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -35,11 +36,14 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   // Reposts and community approvals wrap the real post as JSON in content.
   const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
 
-  const author = useAuthor(displayEvent.pubkey);
+  const author = useAuthor(isRss ? undefined : displayEvent.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(displayEvent.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
-  const displayName = rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
+  const rssFeedTitle = displayEvent.tags.find(([k]) => k === 'feedTitle')?.[1];
+  const displayName = isRss
+    ? (rssFeedTitle ?? 'RSS Feed')
+    : rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
   const { addToQueue } = useMixstr();
 
   const images = extractImages(displayEvent);
@@ -50,6 +54,8 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   const isEmbed = embeds.length > 0 && !isVideo;
   const embed = embeds[0];
   const title = getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim();
+  const isRss = isRssSyntheticEvent(displayEvent);
+  const rssLink = isRss ? displayEvent.tags.find(([k]) => k === 'link')?.[1] : undefined;
 
   // Choose thumbnail: explicit first, then extract a frame from the video if available.
   const thumbnail = embed?.thumbnail ?? images[0];
@@ -64,6 +70,10 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   if (!thumbnail && !isVideo && !isEmbed && !livestream) return null;
 
   const handleCardClick = () => {
+    if (rssLink) {
+      window.open(rssLink, '_blank', 'noopener,noreferrer');
+      return;
+    }
     navigate(`/${nevent}`);
   };
 
@@ -148,14 +158,27 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
 
       {/* Info row */}
       <div className="p-3 flex gap-2">
-        <Link to={`/${npub}`} onClick={(e) => e.stopPropagation()}>
-          <Avatar className="w-8 h-8 flex-shrink-0 mt-0.5">
-            <AvatarImage src={meta?.picture} />
-            <AvatarFallback className="text-xs bg-primary/20 text-primary font-bold">
-              {displayName[0].toUpperCase()}
-            </AvatarFallback>
-          </Avatar>
-        </Link>
+        {isRss ? (
+          <a
+            href={rssLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="w-8 h-8 flex-shrink-0 mt-0.5 rounded-full bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center"
+            title="Open original article"
+          >
+            <Rss size={14} className="text-orange-500" />
+          </a>
+        ) : (
+          <Link to={`/${npub}`} onClick={(e) => e.stopPropagation()}>
+            <Avatar className="w-8 h-8 flex-shrink-0 mt-0.5">
+              <AvatarImage src={meta?.picture} />
+              <AvatarFallback className="text-xs bg-primary/20 text-primary font-bold">
+                {displayName[0].toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+          </Link>
+        )}
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground line-clamp-2 leading-snug">
             {title || 'Untitled'}

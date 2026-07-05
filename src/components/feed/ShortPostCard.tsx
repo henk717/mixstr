@@ -5,6 +5,8 @@ import { ChevronDown, ChevronUp, Repeat2, Play, ExternalLink, CheckCircle } from
 import { cn } from '@/lib/utils';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
+import { RssAuthorHeader } from './RssAuthorHeader';
+import { RssOpenRow } from './RssOpenRow';
 import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
 import { Button } from '@/components/ui/button';
@@ -24,6 +26,7 @@ import {
   tryExtractEmbeddedEvent,
   isCommunityApproval,
 } from '@/lib/postUtils';
+import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useParentEvent } from '@/hooks/useParentEvent';
 
@@ -56,6 +59,7 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   const cover = getCoverImage(displayEvent);
   const summary = getSummary(displayEvent);
   const nevent = eventToNevent(displayEvent);
+  const isRss = isRssSyntheticEvent(displayEvent);
 
   // For replies: fetch the parent event so the compact chip can replace the
   // placeholder text once it resolves.
@@ -64,7 +68,14 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
 
   const hasMedia = images.length > 0 || videos.length > 0 || embeds.length > 0;
 
-  const handleCardClick = () => navigate(`/${nevent}`);
+  const handleCardClick = () => {
+    if (isRss) {
+      const link = displayEvent.tags.find(([k]) => k === 'link')?.[1];
+      if (link) window.open(link, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    navigate(`/${nevent}`);
+  };
 
   // Build a compact media hint label e.g. "2 images · 1 video"
   const mediaParts: string[] = [];
@@ -104,10 +115,15 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
         className="px-4 py-3 hover:bg-accent/30 transition-colors cursor-pointer"
         onClick={handleCardClick}
       >
-        <PostAuthor
-          pubkey={embeddedEvent ? embeddedEvent.pubkey : event.pubkey}
-          createdAt={embeddedEvent ? embeddedEvent.created_at : event.created_at}
-        />
+        {isRss ? (
+          <RssAuthorHeader event={displayEvent} compact />
+        ) : (
+          <PostAuthor
+            pubkey={embeddedEvent ? embeddedEvent.pubkey : event.pubkey}
+            createdAt={embeddedEvent ? embeddedEvent.created_at : event.created_at}
+            compact
+          />
+        )}
 
         <div className="mt-1.5 pl-11">
           {longform ? (
@@ -260,7 +276,11 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
 
         {/* Actions */}
         <div className="mt-2 pl-11" onClick={(e) => e.stopPropagation()}>
-          <PostActions event={displayEvent} compact />
+          {isRss ? (
+            <RssOpenRow event={displayEvent} compact />
+          ) : (
+            <PostActions event={displayEvent} compact />
+          )}
         </div>
 
         {/* Moderation */}

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Play, Plus, Music, Video, CheckCircle } from 'lucide-react';
+import { Play, Plus, Music, Video, CheckCircle, Rss } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
@@ -12,6 +12,7 @@ import {
   eventToNevent,
   tryExtractEmbeddedEvent,
 } from '@/lib/postUtils';
+import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useMixstr } from '@/hooks/useMixstr';
 import { useVideoThumbnail } from '@/hooks/useVideoThumbnail';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -31,17 +32,22 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
   // Reposts and community approvals wrap the real post as JSON in content.
   const displayEvent = tryExtractEmbeddedEvent(event) ?? event;
 
-  const author = useAuthor(displayEvent.pubkey);
+  const isRss = isRssSyntheticEvent(displayEvent);
+  const author = useAuthor(isRss ? undefined : displayEvent.pubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(displayEvent.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
-  const displayName = rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
+  const rssFeedTitle = displayEvent.tags.find(([k]) => k === 'feedTitle')?.[1];
+  const displayName = isRss
+    ? (rssFeedTitle ?? 'RSS Feed')
+    : rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
   const { playTrack, addToQueue } = useMixstr();
 
   const trackInfo = getAudioTrackInfo(displayEvent);
   const cover = getCoverImage(displayEvent);
   const title = getEventTitle(displayEvent) ?? (displayEvent.content.slice(0, 60).trim() || 'Untitled Track');
   const nevent = eventToNevent(displayEvent);
+  const rssLink = isRss ? displayEvent.tags.find(([k]) => k === 'link')?.[1] : undefined;
 
   // Nothing playable
   if (!trackInfo) return null;
@@ -70,8 +76,12 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
     addToQueue(track);
   };
 
-  // Clicking the row navigates to the event detail page
+  // Clicking the row opens the original RSS article or the event detail page
   const handleRowClick = () => {
+    if (rssLink) {
+      window.open(rssLink, '_blank', 'noopener,noreferrer');
+      return;
+    }
     navigate(`/${nevent}`);
   };
 
@@ -114,13 +124,17 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
       {/* Track info */}
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-sm text-foreground truncate">{track.title}</p>
-        <Link
-          to={`/${npub}`}
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs text-muted-foreground hover:text-primary transition-colors truncate block"
-        >
-          {displayName}
-        </Link>
+        {isRss ? (
+          <span className="text-xs text-muted-foreground truncate block">{displayName}</span>
+        ) : (
+          <Link
+            to={`/${npub}`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-muted-foreground hover:text-primary transition-colors truncate block"
+          >
+            {displayName}
+          </Link>
+        )}
         <div className="flex items-center gap-1.5">
           <p className="text-xs text-muted-foreground">{relativeTime(displayEvent.created_at)}</p>
           {trackInfo.isVideo && (
