@@ -1,7 +1,6 @@
 import { useNostr } from '@nostrify/react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { NRelay1 } from '@nostrify/nostrify';
 import { useFollowing } from './useFollowing';
 import { useCurrentUser } from './useCurrentUser';
 import { useCommunityMetas, isModeratorOf } from './useCommunity';
@@ -397,19 +396,17 @@ async function fetchSource(
     }
 
     case 'relay': {
-      // Single-relay feed — connect directly to the specified relay URL and
-      // query its global feed without routing through the NPool.
+      // Single-relay feed — route through the pool's managed connection for
+      // this URL so we get the same EOSE timeout / retry behavior as the main
+      // following feed. Creating a fresh NRelay1 per page was cold-starting
+      // the socket and causing very small, inconsistent result sets, which
+      // broke infinite scroll.
       if (!source.relayUrl) return [];
-      const relay = new NRelay1(source.relayUrl);
-      try {
-        return await relay.query(
-          [{ kinds: [1, 6, 20, 30023], limit, ...timeFilter }],
-          { signal: AbortSignal.any([abort, AbortSignal.timeout(10_000)]) },
-        );
-      } finally {
-        // NRelay1 doesn't have an explicit close API, connections are managed
-        // by the pool internally — we just let it GC.
-      }
+      const relay = nostr.relay(source.relayUrl);
+      return await relay.query(
+        [{ kinds: [1, 6, 20, 30023], limit, ...timeFilter }],
+        { signal: AbortSignal.any([abort, AbortSignal.timeout(15_000)]) },
+      );
     }
 
     case 'rss':
