@@ -57,12 +57,12 @@ function scoreKeywordPost(event: NostrEvent, tokens: string[]): number {
   return score;
 }
 
-function rankKeywordPosts(events: NostrEvent[], tokens: string[]): NostrEvent[] {
+function rankKeywordPosts(events: NostrEvent[], phrases: string[], tokens: string[]): NostrEvent[] {
   return events
     .filter((event) => event.content.trim().length > 0 && !isRepost(event))
     .filter((event) => {
       const content = event.content.toLowerCase();
-      return tokens.every((token) => content.includes(token));
+      return phrases.every((phrase) => content.includes(phrase));
     })
     .map((event) => ({ event, score: scoreKeywordPost(event, tokens) }))
     .sort((a, b) => {
@@ -201,14 +201,15 @@ async function fetchSource(
     }
 
     case 'keyword': {
-      const keywords = source.keywords ?? [];
-      if (keywords.length === 0) return [];
-      const search = keywords.join(' ');
+      const phrases = source.keywords ?? [];
+      if (phrases.length === 0) return [];
+      const search = phrases.join(' ');
+      const tokens = phrases.flatMap((p) => normalizeTokens(p));
       const events = await nostr.query(
         [{ kinds: [1, 30023], search, limit: limit * 2, ...timeFilter }],
         { signal: abort },
       );
-      return rankKeywordPosts(events, keywords).slice(0, limit);
+      return rankKeywordPosts(events, phrases, tokens).slice(0, limit);
     }
 
     case 'people': {

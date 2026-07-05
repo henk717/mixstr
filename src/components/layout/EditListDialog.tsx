@@ -74,6 +74,35 @@ function IconPicker({ value, onChange }: { value: SidebarListIcon; onChange: (v:
   );
 }
 
+function SearchTermInput({ onAdd }: { onAdd: (term: string) => void }) {
+  const [value, setValue] = useState('');
+
+  const handleAdd = () => {
+    onAdd(value);
+    setValue('');
+  };
+
+  return (
+    <div className="flex gap-1.5">
+      <Input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            handleAdd();
+          }
+        }}
+        placeholder="Type a phrase and press Enter…"
+        className="h-7 text-xs bg-background flex-1"
+      />
+      <Button size="sm" variant="outline" onClick={handleAdd} className="h-7 px-2 text-xs">
+        Add
+      </Button>
+    </div>
+  );
+}
+
 interface EditListDialogProps {
   open: boolean;
   onClose: () => void;
@@ -83,7 +112,7 @@ interface EditListDialogProps {
 
 const SOURCE_TYPES: { value: SourceType; label: string; description: string }[] = [
   { value: 'hashtag', label: 'Hashtag', description: 'Posts tagged with a specific #tag' },
-  { value: 'keyword', label: 'Keyword search', description: 'Posts that contain the given keywords' },
+  { value: 'keyword', label: 'Search term', description: 'Posts that contain the given search phrase(s)' },
   { value: 'people', label: 'Specific People', description: 'Posts from specific npubs' },
   { value: 'follow-list', label: "Someone's Follows", description: "Use another user's NIP-02 follow list" },
   { value: 'dvm', label: 'DVM Feed', description: 'AI-curated feed from a Data Vending Machine' },
@@ -770,24 +799,40 @@ function SourceEditor({
 
       {source.type === 'keyword' && (
         <div className="space-y-2">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Keywords</Label>
-            <Input
-              value={source.keywords?.join(' ') ?? ''}
-              onChange={(e) => {
-                const keywords = e.target.value
-                  .toLowerCase()
-                  .split(/\s+/)
-                  .map((k) => k.replace(/[^a-z0-9\-]/g, ''))
-                  .filter(Boolean);
-                onChange({ ...source, keywords });
-              }}
-              placeholder="bitcoin lightning nostr"
-              className="h-7 text-xs bg-background"
-            />
-          </div>
+          <Label className="text-xs text-muted-foreground">Search terms</Label>
+          {source.keywords && source.keywords.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {source.keywords.map((kw) => (
+                <Badge key={kw} variant="secondary" className="text-xs gap-1 pr-1">
+                  {kw}
+                  <button
+                    onClick={() =>
+                      onChange({
+                        ...source,
+                        keywords: source.keywords?.filter((k) => k !== kw),
+                      })
+                    }
+                    className="text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <X size={10} />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          )}
+          <SearchTermInput
+            onAdd={(term) => {
+              const normalized = term.trim().toLowerCase();
+              if (!normalized) return;
+              if (source.keywords?.includes(normalized)) return;
+              onChange({
+                ...source,
+                keywords: [...(source.keywords ?? []), normalized],
+              });
+            }}
+          />
           <p className="text-xs text-muted-foreground">
-            Separate keywords with spaces. Posts must contain all keywords.
+            Each term is a phrase (spaces allowed). Posts must contain every phrase. Add multiple terms to narrow results.
           </p>
         </div>
       )}

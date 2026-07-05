@@ -7,7 +7,7 @@
 
 export type SourceType =
   | 'hashtag'       // Nostr #t tag feed
-  | 'keyword'       // Keyword search across note content (NIP-50 + client-side filter)
+  | 'keyword'       // Free-text search-term source across note content (NIP-50 + client-side filter)
   | 'dvm'           // DVM-powered feed (kind 5300/6300)
   | 'people'        // Specific pubkeys
   | 'follow-list'   // Someone else's NIP-02 follow list
@@ -27,7 +27,7 @@ export interface ListSource {
   // hashtag
   tag?: string;
 
-  // keyword
+  // search term(s) — each array entry is a whole phrase (may contain spaces)
   keywords?: string[];
 
   // dvm
@@ -168,7 +168,7 @@ export function createSourceId(): string {
 export function sourceDescription(source: ListSource): string {
   switch (source.type) {
     case 'hashtag': return `#${source.tag ?? '?'}`;
-    case 'keyword': return `Keywords: ${source.keywords?.join(', ') ?? '?'}`;
+    case 'keyword': return `Search terms: ${source.keywords?.join(', ') ?? '?'}`;
     case 'dvm': return `DVM: ${source.label ?? source.dvmPubkey?.slice(0, 12) ?? '?'}`;
     case 'people': return `${source.pubkeys?.length ?? 0} people`;
     case 'follow-list': return `Follow list of ${source.label ?? source.followListPubkey?.slice(0, 12) ?? '?'}`;
