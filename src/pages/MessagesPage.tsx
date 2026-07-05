@@ -2,8 +2,14 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthor } from '@/hooks/useAuthor';
-import { useDirectMessages, groupIntoConversations, useSendDm } from '@/hooks/useDirectMessages';
-import { useLocalStorage } from '@/hooks/useLocalStorage';
+import {
+  useDirectMessages,
+  useDmDeletions,
+  useDeleteConversation,
+  groupIntoConversations,
+  useSendDm,
+} from '@/hooks/useDirectMessages';
+import { useMuteList } from '@/hooks/useMuteList';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -20,7 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Mail, Lock, ArrowLeft, Send, Trash2, AlertCircle } from 'lucide-react';
+import { Mail, Lock, ArrowLeft, Send, Trash2, AlertCircle, RefreshCw } from 'lucide-react';
 import { relativeTime } from '@/lib/postUtils';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
@@ -28,7 +34,7 @@ import type { Conversation, DecryptedMessage } from '@/hooks/useDirectMessages';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/useToast';
 
-// ----- Sub-components -----
+// ─── Avatar / name helpers ────────────────────────────────────────────────────
 
 function ConversationAvatar({ pubkey, size = 'md' }: { pubkey: string; size?: 'sm' | 'md' }) {
   const author = useAuthor(pubkey);
@@ -51,16 +57,20 @@ function ConversationName({ pubkey }: { pubkey: string }) {
   return <>{meta?.display_name || meta?.name || pubkey.slice(0, 10) + '…'}</>;
 }
 
+// ─── Conversation list item ───────────────────────────────────────────────────
+
 function ConversationListItem({
   conv,
   active,
   onSelect,
   onDelete,
+  isDeleting,
 }: {
   conv: Conversation;
   active: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  isDeleting: boolean;
 }) {
   const [showDelete, setShowDelete] = useState(false);
   const last = conv.lastMessage;
@@ -74,6 +84,7 @@ function ConversationListItem({
       onClick={onSelect}
     >
       <ConversationAvatar pubkey={conv.peerPubkey} />
+
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-semibold truncate">
@@ -88,12 +99,16 @@ function ConversationListItem({
           {last.rumor.content}
         </p>
       </div>
+
       <button
         className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all flex-shrink-0"
         onClick={(e) => { e.stopPropagation(); setShowDelete(true); }}
+        disabled={isDeleting}
         title="Delete conversation"
       >
-        <Trash2 size={14} />
+        {isDeleting
+          ? <RefreshCw size={14} className="animate-spin" />
+          : <Trash2 size={14} />}
       </button>
 
       <AlertDialog open={showDelete} onOpenChange={setShowDelete}>
@@ -101,14 +116,20 @@ function ConversationListItem({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
             <AlertDialogDescription>
-              This hides the conversation locally. The messages still exist on your relay and the other person's device. This cannot be undone.
+              Messages up to this point will be hidden on all your devices. If this person messages
+              you again, the new messages will still appear. This is synced to Nostr so it works
+              across devices.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={(e) => { e.stopPropagation(); }}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel onClick={(e) => e.stopPropagation()}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(e) => { e.stopPropagation(); onDelete(); setShowDelete(false); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+                setShowDelete(false);
+              }}
             >
               Delete
             </AlertDialogAction>
@@ -118,6 +139,8 @@ function ConversationListItem({
     </div>
   );
 }
+
+// ─── Message bubble ───────────────────────────────────────────────────────────
 
 function MessageBubble({ msg, myPubkey }: { msg: DecryptedMessage; myPubkey: string }) {
   const isMine = msg.rumor.pubkey === myPubkey;
@@ -137,13 +160,20 @@ function MessageBubble({ msg, myPubkey }: { msg: DecryptedMessage; myPubkey: str
         )}
       >
         <p className="whitespace-pre-wrap break-words">{msg.rumor.content}</p>
-        <p className={cn('text-[10px] mt-1 text-right', isMine ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
+        <p
+          className={cn(
+            'text-[10px] mt-1 text-right',
+            isMine ? 'text-primary-foreground/60' : 'text-muted-foreground',
+          )}
+        >
           {relativeTime(msg.rumor.created_at)}
         </p>
       </div>
     </div>
   );
 }
+
+// ─── Chat view ────────────────────────────────────────────────────────────────
 
 function ChatView({
   conv,
@@ -174,7 +204,6 @@ function ChatView({
     try {
       await send(conv.peerPubkey, text.trim());
       setText('');
-      toast({ title: 'Message sent' });
     } catch (err) {
       toast({ title: 'Failed to send', description: String(err), variant: 'destructive' });
     } finally {
@@ -191,7 +220,7 @@ function ChatView({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Chat header */}
+      {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-background/90 backdrop-blur flex-shrink-0">
         <button
           className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
@@ -202,7 +231,9 @@ function ChatView({
         <Link to={`/${npub}`} className="flex items-center gap-3 group">
           <ConversationAvatar pubkey={conv.peerPubkey} size="sm" />
           <div>
-            <p className="text-sm font-semibold group-hover:text-primary transition-colors">{displayName}</p>
+            <p className="text-sm font-semibold group-hover:text-primary transition-colors">
+              {displayName}
+            </p>
             {meta?.nip05 && (
               <p className="text-[10px] text-muted-foreground">{meta.nip05}</p>
             )}
@@ -212,7 +243,7 @@ function ChatView({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-0">
+      <div className="flex-1 overflow-y-auto px-4 py-4">
         {conv.messages.length === 0 && (
           <div className="text-center text-muted-foreground text-sm py-8">
             No messages yet. Say hello!
@@ -241,26 +272,35 @@ function ChatView({
           onClick={handleSend}
           disabled={!text.trim() || sending}
         >
-          <Send size={16} />
+          {sending ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
         </Button>
       </div>
     </div>
   );
 }
 
-// ----- Main page -----
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 export function MessagesPage() {
   useSeoMeta({ title: 'Messages · Mixstr' });
+
   const { user } = useCurrentUser();
-  const { data: messages = [], isLoading, error } = useDirectMessages();
-  const [deletedConvs, setDeletedConvs] = useLocalStorage<string[]>('mixstr-deleted-convs', []);
-  const deletedSet = useMemo(() => new Set(deletedConvs), [deletedConvs]);
+  const { data: messages = [], isLoading: msgsLoading, error } = useDirectMessages();
+  const { data: deletions = {}, isLoading: deletionsLoading } = useDmDeletions();
+  const { muted } = useMuteList();
+  const { mutate: deleteConv, isPending: isDeleting } = useDeleteConversation();
+  const { toast } = useToast();
+
   const [selectedPeer, setSelectedPeer] = useState<string | null>(null);
 
+  const isLoading = msgsLoading || deletionsLoading;
+
+  // Combine muted pubkeys from personal list and subscribed blocklists
+  const mutedPubkeys = muted.pubkeys;
+
   const conversations = useMemo(
-    () => groupIntoConversations(messages, deletedSet),
-    [messages, deletedSet],
+    () => groupIntoConversations(messages, deletions, mutedPubkeys),
+    [messages, deletions, mutedPubkeys],
   );
 
   const selectedConv = useMemo(
@@ -268,9 +308,28 @@ export function MessagesPage() {
     [conversations, selectedPeer],
   );
 
-  function deleteConversation(peerPubkey: string) {
-    setDeletedConvs((prev) => [...prev.filter((p) => p !== peerPubkey), peerPubkey]);
-    if (selectedPeer === peerPubkey) setSelectedPeer(null);
+  function handleDelete(peerPubkey: string) {
+    // Record the current time as the deletion cutoff
+    const deletedAt = Math.floor(Date.now() / 1000);
+    deleteConv(
+      { peerPubkey, deletedAt },
+      {
+        onSuccess: () => {
+          toast({
+            title: 'Conversation deleted',
+            description: 'Hidden on all your devices. New messages will still appear.',
+          });
+          if (selectedPeer === peerPubkey) setSelectedPeer(null);
+        },
+        onError: (err) => {
+          toast({
+            title: 'Failed to delete',
+            description: String(err),
+            variant: 'destructive',
+          });
+        },
+      },
+    );
   }
 
   if (!user) {
@@ -289,7 +348,8 @@ export function MessagesPage() {
         <AlertCircle size={40} className="text-yellow-500" />
         <p className="font-semibold">Signer upgrade required</p>
         <p className="text-muted-foreground text-sm max-w-sm">
-          Your current signer doesn't support NIP-44 encryption. Please upgrade to a compatible browser extension or login method to use encrypted messages.
+          Your current signer doesn't support NIP-44 encryption. Please upgrade to a compatible
+          browser extension or login method to use encrypted messages.
         </p>
       </div>
     );
@@ -297,7 +357,8 @@ export function MessagesPage() {
 
   return (
     <div className="max-w-2xl mx-auto flex flex-col" style={{ minHeight: 'calc(100vh - 0px)' }}>
-      {/* Header — hide when in chat on mobile */}
+
+      {/* Header — only when not in a chat */}
       {!selectedConv && (
         <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border flex-shrink-0">
           <div className="px-4 py-4 flex items-center gap-2">
@@ -311,12 +372,12 @@ export function MessagesPage() {
       {/* Conversation list */}
       {!selectedConv && (
         <div className="flex-1">
-          {/* Encryption info */}
+          {/* Encryption info banner */}
           <div className="mx-4 my-3 px-3 py-2 rounded-lg border border-primary/20 bg-primary/5 flex items-start gap-2">
             <Lock size={14} className="text-primary mt-0.5 flex-shrink-0" />
             <p className="text-xs text-muted-foreground">
               <span className="font-semibold text-foreground">End-to-end encrypted via NIP-17.</span>{' '}
-              Only you can read these messages.
+              Only you can read these messages. Deleted conversations are synced across all your devices.
             </p>
           </div>
 
@@ -361,7 +422,8 @@ export function MessagesPage() {
               conv={conv}
               active={selectedPeer === conv.peerPubkey}
               onSelect={() => setSelectedPeer(conv.peerPubkey)}
-              onDelete={() => deleteConversation(conv.peerPubkey)}
+              onDelete={() => handleDelete(conv.peerPubkey)}
+              isDeleting={isDeleting}
             />
           ))}
         </div>

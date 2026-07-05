@@ -1,6 +1,7 @@
 import { useNostr } from '@nostrify/react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCurrentUser } from './useCurrentUser';
+import { useMuteList } from './useMuteList';
 import type { NostrEvent } from '@nostrify/nostrify';
 
 export interface DecryptedMessage {
@@ -22,8 +23,89 @@ export interface Conversation {
 }
 
 /**
+ * DM deletion state: maps peerPubkey → unix timestamp of the deletion.
+ * All messages from that peer with created_at <= timestamp are hidden.
+ * Stored encrypted as a kind:30078 addressable event (NIP-78) so it syncs across devices.
+ */
+export type DmDeletions = Record<string, number>;
+
+const DM_DELETIONS_D_TAG = 'mixstr-dm-deletions';
+
+// ─── Deletion state (synced via NIP-78 encrypted to self) ────────────────────
+
+export function useDmDeletions() {
+  const { nostr } = useNostr();
+  const { user } = useCurrentUser();
+
+  return useQuery<DmDeletions>({
+    queryKey: ['nostr', 'dm-deletions', user?.pubkey ?? ''],
+    queryFn: async ({ signal }) => {
+      if (!user?.pubkey || !user.signer.nip44) return {};
+
+      const [ev] = await nostr.query(
+        [{ kinds: [30078], authors: [user.pubkey], '#d': [DM_DELETIONS_D_TAG], limit: 1 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
+      );
+
+      if (!ev?.content) return {};
+
+      try {
+        // Encrypted to self: decrypt using our own pubkey as peer
+        const plain = await user.signer.nip44.decrypt(user.pubkey, ev.content);
+        return JSON.parse(plain) as DmDeletions;
+      } catch {
+        return {};
+      }
+    },
+    enabled: !!user?.pubkey && !!user.signer.nip44,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useDeleteConversation() {
+  const { nostr } = useNostr();
+  const { user } = useCurrentUser();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ peerPubkey, deletedAt }: { peerPubkey: string; deletedAt: number }) => {
+      if (!user || !user.signer.nip44) throw new Error('Not logged in or NIP-44 unavailable');
+
+      // Load existing deletions from cache
+      const existing: DmDeletions =
+        queryClient.getQueryData(['nostr', 'dm-deletions', user.pubkey]) ?? {};
+
+      const updated: DmDeletions = { ...existing, [peerPubkey]: deletedAt };
+
+      // Encrypt to self
+      const plain = JSON.stringify(updated);
+      const ciphertext = await user.signer.nip44.encrypt(user.pubkey, plain);
+
+      const event = await user.signer.signEvent({
+        kind: 30078,
+        content: ciphertext,
+        tags: [
+          ['d', DM_DELETIONS_D_TAG],
+          ['alt', 'Mixstr DM deletion timestamps'],
+        ],
+        created_at: Math.floor(Date.now() / 1000),
+      });
+
+      await nostr.event(event, { signal: AbortSignal.timeout(5000) });
+
+      // Optimistic update
+      queryClient.setQueryData(['nostr', 'dm-deletions', user.pubkey], updated);
+
+      return updated;
+    },
+  });
+}
+
+// ─── Message fetching ─────────────────────────────────────────────────────────
+
+/**
  * Fetches and decrypts NIP-17 DMs (kind 1059 gift wraps) for the current user.
- * Returns a list of conversations grouped by peer.
+ * Returns a flat list of decrypted messages sorted newest-first.
  */
 export function useDirectMessages() {
   const { nostr } = useNostr();
@@ -47,27 +129,21 @@ export function useDirectMessages() {
 
       for (const wrap of wraps) {
         try {
-          // Unwrap: outer layer uses a random keypair. We decrypt with our own key
-          // (the wrap's pubkey is the random wrapper key — we decrypt from that).
           const sealJson = await user.signer.nip44.decrypt(wrap.pubkey, wrap.content);
           const seal: NostrEvent = JSON.parse(sealJson);
-
           if (seal.kind !== 13) continue;
 
-          // Decrypt the inner seal using the seal's pubkey (the sender)
           const rumorJson = await user.signer.nip44.decrypt(seal.pubkey, seal.content);
           const rumor: NostrEvent = JSON.parse(rumorJson);
 
-          // Verify that the rumor pubkey matches the seal pubkey (anti-spoofing)
+          // Anti-spoofing: rumor pubkey must match seal pubkey
           if (rumor.pubkey !== seal.pubkey) continue;
 
-          // Only handle kind 14 (chat message)
+          // Only handle kind 14 chat messages
           if (rumor.kind !== 14) continue;
 
           // Determine the peer
           const isSent = rumor.pubkey === user.pubkey;
-          // For sent messages: peer is the first 'p' tag recipient
-          // For received: peer is the sender
           let peerPubkey: string;
           if (isSent) {
             const pTag = rumor.tags.find(([t]) => t === 'p');
@@ -83,7 +159,6 @@ export function useDirectMessages() {
         }
       }
 
-      // Sort by rumor created_at descending
       return messages.sort((a, b) => b.rumor.created_at - a.rumor.created_at);
     },
     enabled: !!user?.pubkey && !!user.signer.nip44,
@@ -92,17 +167,29 @@ export function useDirectMessages() {
   });
 }
 
+// ─── Grouping ─────────────────────────────────────────────────────────────────
+
 /**
- * Groups decrypted messages into conversations by peer.
+ * Groups decrypted messages into conversations by peer, applying:
+ * - Block filtering: skips messages from muted pubkeys
+ * - Deletion filtering: hides messages from peers up to their deletion timestamp,
+ *   but shows messages received *after* that timestamp (re-opened conversations)
  */
 export function groupIntoConversations(
   messages: DecryptedMessage[],
-  deletedConversations: Set<string>,
+  deletions: DmDeletions,
+  mutedPubkeys: Set<string>,
 ): Conversation[] {
   const byPeer = new Map<string, DecryptedMessage[]>();
 
   for (const msg of messages) {
-    if (deletedConversations.has(msg.peerPubkey)) continue;
+    // Skip blocked senders
+    if (mutedPubkeys.has(msg.peerPubkey)) continue;
+
+    // Skip messages hidden by deletion (at or before deletion timestamp)
+    const deletedAt = deletions[msg.peerPubkey];
+    if (deletedAt !== undefined && msg.rumor.created_at <= deletedAt) continue;
+
     const list = byPeer.get(msg.peerPubkey) ?? [];
     list.push(msg);
     byPeer.set(msg.peerPubkey, list);
@@ -121,9 +208,10 @@ export function groupIntoConversations(
     .sort((a, b) => b.lastMessage.rumor.created_at - a.lastMessage.rumor.created_at);
 }
 
+// ─── Sending ──────────────────────────────────────────────────────────────────
+
 /**
  * Hook to send a NIP-17 DM to a recipient pubkey.
- * Returns a send function and loading/error state.
  */
 export function useSendDm() {
   const { nostr } = useNostr();
@@ -145,42 +233,42 @@ export function useSendDm() {
       content,
     };
 
-    // Helper to create a gift wrap for one recipient
+    // Helper: create a gift wrap for one recipient
     async function makeWrap(receiverPubkey: string): Promise<NostrEvent> {
-      // Inner: seal (kind 13) — signed by sender
-      const sealContent = await user!.signer.nip44!.encrypt(receiverPubkey, JSON.stringify(rumor));
-      const sealTemplate = {
+      const sealContent = await user!.signer.nip44!.encrypt(
+        receiverPubkey,
+        JSON.stringify(rumor),
+      );
+      const seal = await user!.signer.signEvent({
         kind: 13,
         content: sealContent,
         tags: [],
-        created_at: now - Math.floor(Math.random() * 172800), // up to 2 days in past
-      };
-      const seal = await user!.signer.signEvent(sealTemplate);
+        created_at: now - Math.floor(Math.random() * 172800),
+      });
 
-      // Outer: gift wrap (kind 1059) — signed by a random ephemeral key
-      // Since we don't have a random keypair readily available in-browser without crypto API,
-      // we sign with the user's key but use a random created_at to obscure timing.
-      // Note: proper NIP-17 uses a random keypair for the wrap, but signing with our key
-      // is an acceptable fallback that still preserves inner message privacy.
-      const wrapContent = await user!.signer.nip44!.encrypt(receiverPubkey, JSON.stringify(seal));
-      const wrapTemplate = {
+      const wrapContent = await user!.signer.nip44!.encrypt(
+        receiverPubkey,
+        JSON.stringify(seal),
+      );
+      return user!.signer.signEvent({
         kind: 1059,
         content: wrapContent,
         tags: [['p', receiverPubkey]],
         created_at: now - Math.floor(Math.random() * 172800),
-      };
-      return user!.signer.signEvent(wrapTemplate);
+      });
     }
 
-    // Send to recipient
-    const wrapForRecipient = await makeWrap(recipientPubkey);
-    await nostr.event(wrapForRecipient, { signal: AbortSignal.timeout(5000) });
+    // Publish to recipient and to self (so sent messages are readable)
+    const [wrapForRecipient, wrapForSelf] = await Promise.all([
+      makeWrap(recipientPubkey),
+      makeWrap(user.pubkey),
+    ]);
 
-    // Send to self (so we can read our own sent messages)
-    const wrapForSelf = await makeWrap(user.pubkey);
-    await nostr.event(wrapForSelf, { signal: AbortSignal.timeout(5000) });
+    await Promise.all([
+      nostr.event(wrapForRecipient, { signal: AbortSignal.timeout(5000) }),
+      nostr.event(wrapForSelf, { signal: AbortSignal.timeout(5000) }),
+    ]);
 
-    // Invalidate DM cache
     queryClient.invalidateQueries({ queryKey: ['nostr', 'dms', user.pubkey] });
   }
 
