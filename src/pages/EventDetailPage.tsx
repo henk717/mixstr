@@ -1,5 +1,5 @@
 import { useSeoMeta } from '@unhead/react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, MessageCircle } from 'lucide-react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
@@ -194,18 +194,27 @@ function ReplyItem({ reply }: { reply: NostrEvent }) {
   const meta = author.data?.metadata;
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || reply.pubkey.slice(0, 10) + '…';
+  const npub = nip19.npubEncode(reply.pubkey);
 
   return (
     <div className="flex gap-3 px-4 py-4 border-b border-border hover:bg-accent/20 transition-colors">
-      <Avatar className="w-9 h-9 flex-shrink-0 mt-0.5">
-        <AvatarImage src={meta?.picture} />
-        <AvatarFallback className="text-xs bg-primary/20 text-primary font-bold">
-          {displayName[0].toUpperCase()}
-        </AvatarFallback>
-      </Avatar>
+      <Link to={`/${npub}`} onClick={(e) => e.stopPropagation()}>
+        <Avatar className="w-9 h-9 flex-shrink-0 mt-0.5">
+          <AvatarImage src={meta?.picture} />
+          <AvatarFallback className="text-xs bg-primary/20 text-primary font-bold">
+            {displayName[0].toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+      </Link>
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-foreground">{displayName}</span>
+          <Link
+            to={`/${npub}`}
+            onClick={(e) => e.stopPropagation()}
+            className="text-sm font-semibold text-foreground hover:text-primary transition-colors"
+          >
+            {displayName}
+          </Link>
           <span className="text-xs text-muted-foreground">{relativeTime(reply.created_at)}</span>
         </div>
         <div className="mt-1">

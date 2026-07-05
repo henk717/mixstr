@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { ChevronDown, ChevronUp, ArrowRight } from 'lucide-react';
+import { nip19 } from 'nostr-tools';
 import { cn } from '@/lib/utils';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
 import { NoteContent } from '@/components/NoteContent';
+import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
 import {
   extractImages,
   extractVideos,
@@ -16,10 +18,12 @@ import {
   isReply,
   isLongform,
   eventToNevent,
+  getParentEventId,
   hasMedia as eventHasMedia,
 } from '@/lib/postUtils';
 import { useTopComments } from '@/hooks/useEventComments';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useParentEvent } from '@/hooks/useParentEvent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -39,6 +43,8 @@ interface LongPostCardProps {
  *   their full text alongside the media.
  * - Long-form articles (kind 30023) are shown as a rich card with cover
  *   image, title, summary, and full body.
+ * - When the event is a reply, the parent post is shown above it
+ *   (full post preview + full reply) instead of inline/without context.
  */
 const TEXT_ONLY_CLAMP = 2000;
 
@@ -48,6 +54,8 @@ export function LongPostCard({ event }: LongPostCardProps) {
   const nevent = eventToNevent(event);
 
   const reply = isReply(event);
+  const parentRef = reply ? getParentEventId(event) : null;
+  const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
   const longform = isLongform(event);
   const title = getEventTitle(event);
   const cover = getCoverImage(event);
@@ -68,45 +76,93 @@ export function LongPostCard({ event }: LongPostCardProps) {
   return (
     <article
       className={cn(
-        'px-4 py-5 border-b border-border hover:bg-accent/20 transition-colors cursor-pointer',
+        'border-b border-border hover:bg-accent/20 transition-colors cursor-pointer',
         reply && 'border-l-2 border-l-primary/30',
       )}
       onClick={handleCardClick}
     >
-      <PostAuthor pubkey={event.pubkey} createdAt={event.created_at} />
+      {/* ── Parent context (long view shows full parent preview above the reply) ── */}
+      {reply && parentEvent && (
+        <ReplyParentPreview
+          parent={parentEvent}
+          onParentClick={() => navigate(`/${eventToNevent(parentEvent)}`)}
+          className="pt-4"
+        />
+      )}
+      {reply && !parentEvent && parentRef && (
+        <div className="pt-2 pb-0">
+          <ReplyingToChip parentId={parentRef.id} parentAuthor={parentRef.author} isPending={parentPending} />
+        </div>
+      )}
 
-      <div className="mt-3 space-y-3">
-        {longform ? (
-          /* ── Long-form article (kind 30023) ── */
-          <div className="rounded-xl border border-border overflow-hidden bg-card">
-            {cover && (
-              <img
-                src={cover}
-                alt={title ?? 'Article'}
-                className="w-full h-52 object-cover"
-                loading="lazy"
-              />
-            )}
-            <div className="p-4 space-y-2">
-              {title && (
-                <h2 className="font-bold text-base text-foreground leading-snug">{title}</h2>
+      <div className="px-4 py-5">
+        <PostAuthor pubkey={event.pubkey} createdAt={event.created_at} />
+
+        <div className="mt-3 space-y-3">
+          {longform ? (
+            /* ── Long-form article (kind 30023) ── */
+            <div className="rounded-xl border border-border overflow-hidden bg-card">
+              {cover && (
+                <img
+                  src={cover}
+                  alt={title ?? 'Article'}
+                  className="w-full h-52 object-cover"
+                  loading="lazy"
+                />
               )}
-              {summary && (
-                <p className="text-sm text-muted-foreground">{summary}</p>
-              )}
+              <div className="p-4 space-y-2">
+                {title && (
+                  <h2 className="font-bold text-base text-foreground leading-snug">{title}</h2>
+                )}
+                {summary && (
+                  <p className="text-sm text-muted-foreground">{summary}</p>
+                )}
+                <NoteContent
+                  event={event}
+                  className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
+                />
+                {shouldClampText && (
+                  <button
+                    className="text-xs text-primary flex items-center gap-1 hover:underline"
+                    onClick={(e) => { e.stopPropagation(); setTextExpanded(true); }}
+                  >
+                    <ChevronDown size={14} /> Read more
+                  </button>
+                )}
+                {isVeryLong && textExpanded && (
+                  <button
+                    className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
+                    onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
+                  >
+                    <ChevronUp size={14} /> Show less
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ── Regular post ── */
+            <>
+              {/*
+                NoteContent renders the text plus any inline nostr mentions/hashtags.
+                Media (images, videos) are handled separately below so we can control
+                their layout precisely — pass disableMediaEmbeds so NoteContent doesn't
+                also try to render them, which would cause duplicates.
+              */}
               <NoteContent
                 event={event}
                 className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
+                disableMediaEmbeds
               />
+
               {shouldClampText && (
                 <button
                   className="text-xs text-primary flex items-center gap-1 hover:underline"
                   onClick={(e) => { e.stopPropagation(); setTextExpanded(true); }}
                 >
-                  <ChevronDown size={14} /> Read more
+                  <ChevronDown size={14} /> Show more
                 </button>
               )}
-              {isVeryLong && textExpanded && (
+              {isVeryLong && !hasAnyMedia && textExpanded && (
                 <button
                   className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
                   onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
@@ -114,98 +170,66 @@ export function LongPostCard({ event }: LongPostCardProps) {
                   <ChevronUp size={14} /> Show less
                 </button>
               )}
-            </div>
-          </div>
-        ) : (
-          /* ── Regular post ── */
-          <>
-            {/*
-              NoteContent renders the text plus any inline nostr mentions/hashtags.
-              Media (images, videos) are handled separately below so we can control
-              their layout precisely — pass disableMediaEmbeds so NoteContent doesn't
-              also try to render them, which would cause duplicates.
-            */}
-            <NoteContent
-              event={event}
-              className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
-              disableMediaEmbeds
-            />
 
-            {shouldClampText && (
-              <button
-                className="text-xs text-primary flex items-center gap-1 hover:underline"
-                onClick={(e) => { e.stopPropagation(); setTextExpanded(true); }}
-              >
-                <ChevronDown size={14} /> Show more
-              </button>
-            )}
-            {isVeryLong && !hasAnyMedia && textExpanded && (
-              <button
-                className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
-                onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
-              >
-                <ChevronUp size={14} /> Show less
-              </button>
-            )}
+              {/* ── Images ── */}
+              {images.length > 0 && (
+                <div
+                  className={cn(
+                    'grid gap-1 rounded-xl overflow-hidden',
+                    images.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
+                  )}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {images.slice(0, 4).map((url, i) => (
+                    <img
+                      key={i}
+                      src={url}
+                      alt=""
+                      className="w-full object-cover aspect-video"
+                      loading="lazy"
+                    />
+                  ))}
+                </div>
+              )}
 
-            {/* ── Images ── */}
-            {images.length > 0 && (
-              <div
-                className={cn(
-                  'grid gap-1 rounded-xl overflow-hidden',
-                  images.length > 1 ? 'grid-cols-2' : 'grid-cols-1',
-                )}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {images.slice(0, 4).map((url, i) => (
-                  <img
-                    key={i}
-                    src={url}
-                    alt=""
-                    className="w-full object-cover aspect-video"
-                    loading="lazy"
+              {/* ── Videos ── */}
+              {videos.length > 0 && (
+                <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                  <video
+                    src={videos[0]}
+                    controls
+                    className="w-full max-h-96 object-contain bg-black"
                   />
-                ))}
-              </div>
-            )}
+                </div>
+              )}
 
-            {/* ── Videos ── */}
-            {videos.length > 0 && (
-              <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                <video
-                  src={videos[0]}
-                  controls
-                  className="w-full max-h-96 object-contain bg-black"
-                />
-              </div>
-            )}
+              {/* ── External embeds (YouTube, Twitch, Spotify, SoundCloud…) ── */}
+              {embeds.map((embed) => (
+                <div
+                  key={embed.url}
+                  className="rounded-xl overflow-hidden border border-border aspect-video"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <iframe
+                    src={embed.embedUrl}
+                    className="w-full h-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    loading="lazy"
+                    title={embed.label}
+                  />
+                </div>
+              ))}
+            </>
+          )}
+        </div>
 
-            {/* ── External embeds (YouTube, Twitch, Spotify, SoundCloud…) ── */}
-            {embeds.map((embed) => (
-              <div
-                key={embed.url}
-                className="rounded-xl overflow-hidden border border-border aspect-video"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <iframe
-                  src={embed.embedUrl}
-                  className="w-full h-full"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                  loading="lazy"
-                  title={embed.label}
-                />
-              </div>
-            ))}
-          </>
-        )}
-      </div>
+        {/* Top 3 comments preview */}
+        <CommentPreview eventId={event.id} nevent={nevent} />
 
-      {/* Top 3 comments preview */}
-      <CommentPreview eventId={event.id} nevent={nevent} />
-
-      <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-        <PostActions event={event} />
+        <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+          <PostActions event={event} />
+        </div>
       </div>
     </article>
   );
@@ -250,17 +274,26 @@ function CommentPreviewItem({ comment }: { comment: NostrEvent }) {
   const meta = author.data?.metadata;
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || comment.pubkey.slice(0, 8) + '…';
+  const npub = nip19.npubEncode(comment.pubkey);
 
   return (
     <div className="flex gap-2 items-start" onClick={(e) => e.stopPropagation()}>
-      <Avatar className="w-6 h-6 flex-shrink-0 mt-0.5">
-        <AvatarImage src={meta?.picture} />
-        <AvatarFallback className="text-[9px] bg-primary/20 text-primary font-bold">
-          {displayName[0].toUpperCase()}
-        </AvatarFallback>
-      </Avatar>
+      <Link to={`/${npub}`} onClick={(e) => e.stopPropagation()}>
+        <Avatar className="w-6 h-6 flex-shrink-0 mt-0.5">
+          <AvatarImage src={meta?.picture} />
+          <AvatarFallback className="text-[9px] bg-primary/20 text-primary font-bold">
+            {displayName[0].toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+      </Link>
       <div className="min-w-0">
-        <span className="text-xs font-semibold text-foreground/80">{displayName} </span>
+        <Link
+          to={`/${npub}`}
+          onClick={(e) => e.stopPropagation()}
+          className="text-xs font-semibold text-foreground/80 hover:text-primary transition-colors"
+        >
+          {displayName}
+        </Link>{' '}
         <span className="text-xs text-muted-foreground line-clamp-2">{comment.content}</span>
       </div>
     </div>
