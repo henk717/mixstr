@@ -10,6 +10,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useEventById } from '@/hooks/useEventById';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { getLivestreamInfo, relativeTime } from '@/lib/postUtils';
+import { ChatMessage } from '@/components/feed/ChatMessage';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -103,7 +104,7 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-background/90 backdrop-blur border-b border-border px-4 py-3 flex items-center gap-3">
         <Button variant="ghost" size="icon" className="w-8 h-8 flex-shrink-0" onClick={() => navigate(-1)}>
@@ -139,57 +140,57 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
       )}
 
       {event && info && (
-        <div className="flex flex-col lg:flex-row gap-0 lg:gap-4 lg:p-4">
-          {/* Left: video + info */}
-          <div className="flex-1 min-w-0">
-            {/* Video player */}
-            <div className="relative aspect-video bg-black lg:rounded-xl overflow-hidden">
-              {info.streamUrl ? (
-                <video
-                  key={info.streamUrl}
-                  src={info.streamUrl}
-                  controls
-                  autoPlay
-                  className="w-full h-full object-contain"
-                  playsInline
+        <div className="flex flex-col gap-0 lg:gap-4 lg:p-4">
+          {/* Video player - full width, larger on desktop */}
+          <div className="relative aspect-video bg-black lg:rounded-xl overflow-hidden shadow-lg">
+            {info.streamUrl ? (
+              <video
+                key={info.streamUrl}
+                src={info.streamUrl}
+                controls
+                autoPlay
+                className="w-full h-full object-contain"
+                playsInline
+              />
+            ) : info.thumbnail ? (
+              <div className="relative w-full h-full">
+                <img
+                  src={info.thumbnail}
+                  alt={info.title}
+                  className="w-full h-full object-cover"
                 />
-              ) : info.thumbnail ? (
-                <div className="relative w-full h-full">
-                  <img
-                    src={info.thumbnail}
-                    alt={info.title}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
-                    <Wifi size={40} className={isLive ? 'text-red-400 animate-pulse' : 'text-muted-foreground'} />
-                    <p className="text-white/80 text-sm">
-                      {isLive ? 'Stream player not available in browser' : 'Stream has ended'}
-                    </p>
-                    {info.streamUrl && (
-                      <a
-                        href={info.streamUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-                      >
-                        <ExternalLink size={12} />
-                        Open stream directly
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-red-950 to-black">
-                  <Wifi size={48} className={isLive ? 'text-red-500 animate-pulse' : 'text-muted-foreground'} />
-                  <p className="text-white/60 text-sm">
-                    {isLive ? 'No stream URL available' : 'Stream has ended'}
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/60">
+                  <Wifi size={40} className={isLive ? 'text-red-400 animate-pulse' : 'text-muted-foreground'} />
+                  <p className="text-white/80 text-sm">
+                    {isLive ? 'Stream player not available in browser' : 'Stream has ended'}
                   </p>
+                  {info.streamUrl && (
+                    <a
+                      href={info.streamUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                    >
+                      <ExternalLink size={12} />
+                      Open stream directly
+                    </a>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-red-950 to-black">
+                <Wifi size={48} className={isLive ? 'text-red-500 animate-pulse' : 'text-muted-foreground'} />
+                <p className="text-white/60 text-sm">
+                  {isLive ? 'No stream URL available' : 'Stream has ended'}
+                </p>
+              </div>
+            )}
+          </div>
 
-            {/* Stream info */}
-            <div className="px-4 py-3 lg:px-0">
+          {/* Info + Chat row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 lg:gap-4 px-4 lg:px-0">
+            {/* Left: stream info/description */}
+            <div className="py-3 lg:py-0 min-w-0">
               <h2 className="text-lg font-bold text-foreground leading-snug">{info.title}</h2>
 
               <div className="flex items-center gap-3 mt-2 flex-wrap">
@@ -245,62 +246,62 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Right: live chat */}
-          <div className="w-full lg:w-80 xl:w-96 flex-shrink-0 border-t border-border lg:border lg:rounded-xl overflow-hidden flex flex-col"
-            style={{ height: 'clamp(300px, 50vh, 500px)' }}>
-            {/* Chat header */}
-            <div className="px-3 py-2.5 border-b border-border flex items-center gap-2 bg-card flex-shrink-0">
-              <MessageCircle size={14} className="text-primary" />
-              <span className="text-sm font-semibold">Live Chat</span>
-              <span className="text-xs text-muted-foreground ml-auto">
-                {chatMessages.length} messages
-              </span>
-            </div>
+            {/* Right: live chat */}
+            <div className="w-full flex-shrink-0 border-t border-border lg:border lg:rounded-xl overflow-hidden flex flex-col"
+              style={{ height: 'clamp(300px, 40vh, 520px)' }}>
+              {/* Chat header */}
+              <div className="px-3 py-2.5 border-b border-border flex items-center gap-2 bg-card flex-shrink-0">
+                <MessageCircle size={14} className="text-primary" />
+                <span className="text-sm font-semibold">Live Chat</span>
+                <span className="text-xs text-muted-foreground ml-auto">
+                  {chatMessages.length} messages
+                </span>
+              </div>
 
-            {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0">
-              {chatMessages.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center py-6">
-                  {isLive ? 'No messages yet. Be the first to chat!' : 'No chat messages for this stream.'}
-                </p>
-              )}
-              {chatMessages.map((msg) => (
-                <ChatMessage key={msg.id} event={msg} />
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Chat input */}
-            {isLive && (
-              <div className="px-3 py-2 border-t border-border flex gap-2 flex-shrink-0">
-                {user ? (
-                  <>
-                    <Input
-                      value={chatMsg}
-                      onChange={(e) => setChatMsg(e.target.value)}
-                      onKeyDown={handleChatKey}
-                      placeholder="Say something…"
-                      className="h-8 text-sm flex-1"
-                      disabled={isSending}
-                    />
-                    <Button
-                      size="icon"
-                      className="h-8 w-8 flex-shrink-0 rounded-full"
-                      onClick={handleSendChat}
-                      disabled={!chatMsg.trim() || isSending}
-                    >
-                      <Send size={13} />
-                    </Button>
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground py-1">
-                    Log in to chat
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0">
+                {chatMessages.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-6">
+                    {isLive ? 'No messages yet. Be the first to chat!' : 'No chat messages for this stream.'}
                   </p>
                 )}
+                {chatMessages.map((msg) => (
+                  <ChatMessage key={msg.id} event={msg} />
+                ))}
+                <div ref={chatEndRef} />
               </div>
-            )}
+
+              {/* Chat input */}
+              {isLive && (
+                <div className="px-3 py-2 border-t border-border flex gap-2 flex-shrink-0">
+                  {user ? (
+                    <>
+                      <Input
+                        value={chatMsg}
+                        onChange={(e) => setChatMsg(e.target.value)}
+                        onKeyDown={handleChatKey}
+                        placeholder="Say something…"
+                        className="h-8 text-sm flex-1"
+                        disabled={isSending}
+                      />
+                      <Button
+                        size="icon"
+                        className="h-8 w-8 flex-shrink-0 rounded-full"
+                        onClick={handleSendChat}
+                        disabled={!chatMsg.trim() || isSending}
+                      >
+                        <Send size={13} />
+                      </Button>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground py-1">
+                      Log in to chat
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
