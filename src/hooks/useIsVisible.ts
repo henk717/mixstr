@@ -26,7 +26,7 @@ export function useIsVisible<T extends HTMLElement = HTMLElement>(options?: UseI
           observer.disconnect();
         }
       },
-      { rootMargin: '200px', ...options },
+      { rootMargin: '1000px', ...options },
     );
 
     observer.observe(el);
