@@ -7,6 +7,8 @@ const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
 const PAGE_SIZE = 250;
 /** Per-relay query timeout. Slow/stuck relays get marked done quickly. */
 const QUERY_TIMEOUT = 4_000;
+/** How often to re-probe relays once we think history is exhausted. */
+const HISTORY_REPROBE_INTERVAL = 30_000;
 
 interface RelayCursor {
   oldest?: number;
@@ -353,6 +355,24 @@ export function useProfileFeed(pubkey: string) {
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
   }, [fetchOlder, hasMore, isLoading]);
+
+  // ── Re-probe exhausted relays periodically ─────────────────────────────────
+  // Relays can come back online, or the user may publish while we thought we
+  // were done. Wake the crawler up every so often to check again.
+  useEffect(() => {
+    if (hasMore || isLoading) return;
+
+    const id = setInterval(() => {
+      const urls = readRelays.length === 0 ? [''] : readRelays;
+      for (const url of urls) {
+        const cursor = perRelayCursorRef.current.get(url);
+        if (cursor) cursor.hasMore = true;
+      }
+      setHasMore(true);
+    }, HISTORY_REPROBE_INTERVAL);
+
+    return () => clearInterval(id);
+  }, [hasMore, isLoading, readRelays]);
 
   return {
     events,
