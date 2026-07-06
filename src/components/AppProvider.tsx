@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useState, useCallback } from 'react';
 import { z } from 'zod';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { AppContext, type AppConfig, type AppContextType, type Theme, type RelayMetadata, type BlossomServerMetadata } from '@/contexts/AppContext';
@@ -62,9 +62,18 @@ export function AppProvider(props: AppProviderProps) {
 
   const config = { ...defaultConfig, ...rawConfig };
 
+  // Relay sync state - tracks whether NostrSync is actively fetching relays
+  const [isSyncingRelays, setIsSyncingRelaysState] = useState(false);
+  
+  const setIsSyncingRelays = useCallback((isSyncing: boolean) => {
+    setIsSyncingRelaysState(isSyncing);
+  }, []);
+
   const appContextValue: AppContextType = {
     config,
     updateConfig,
+    isSyncingRelays,
+    setIsSyncingRelays,
   };
 
   // Apply theme effects to document

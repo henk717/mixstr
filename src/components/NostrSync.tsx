@@ -36,7 +36,7 @@ export function NostrSync() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const { logins } = useNostrLogin();
-  const { config, updateConfig } = useAppContext();
+  const { config, updateConfig, setIsSyncingRelays } = useAppContext();
 
   // Track whether we have already triggered the bootstrap fetch for this user
   // so we don't re-run it on every render while awaiting the result.
@@ -57,6 +57,8 @@ export function NostrSync() {
 
     const importExtensionRelays = async () => {
       try {
+        setIsSyncingRelays(true);
+        
         const ext = (window as unknown as { nostr?: { getRelays?: () => Promise<Record<string, { read: boolean; write: boolean }>> } }).nostr;
         if (!ext?.getRelays) return;
 
@@ -79,6 +81,8 @@ export function NostrSync() {
         }
       } catch (err) {
         console.warn('[NostrSync] Could not read relays from NIP-07 extension:', err);
+      } finally {
+        setIsSyncingRelays(false);
       }
     };
 
@@ -92,6 +96,7 @@ export function NostrSync() {
 
     const syncRelaysFromNostr = async () => {
       let queryNostr = nostr;
+      let usingBootstrap = false;
 
       if (config.relayMetadata.relays.length === 0) {
         // No relays configured yet — open a temporary pool to bootstrap relays.
@@ -100,6 +105,9 @@ export function NostrSync() {
         bootstrapTriggeredRef.current = user.pubkey;
 
         console.log('[NostrSync] No relays configured — bootstrapping via well-known relays');
+        usingBootstrap = true;
+        setIsSyncingRelays(true);
+        
         const bootstrapPool = new NPool({
           open: (url: string) => new NRelay1(url),
           reqRouter: (filters) => {
@@ -153,6 +161,10 @@ export function NostrSync() {
         }
       } catch (error) {
         console.error('[NostrSync] Failed to sync NIP-65 relays:', error);
+      } finally {
+        if (usingBootstrap) {
+          setIsSyncingRelays(false);
+        }
       }
     };
 
