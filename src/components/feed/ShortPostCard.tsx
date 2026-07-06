@@ -12,6 +12,7 @@ import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
 import { Button } from '@/components/ui/button';
 import { ReplyingToChip } from './ReplyContext';
+import { VideoWithVisibility } from '@/components/VideoWithVisibility';
 import {
   extractImages,
   extractVideos,
@@ -195,11 +196,7 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
 
                   {videos.length > 0 && (
                     <div className="mt-1 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                      <video
-                        src={videos[0]}
-                        controls
-                        className="w-full max-h-72 object-contain bg-black"
-                      />
+                      <VideoWithVisibility src={videos[0]} className="max-h-72" />
                     </div>
                   )}
 

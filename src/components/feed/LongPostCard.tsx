@@ -13,6 +13,7 @@ import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
 import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
 import { RepostBanner } from './RepostBanner';
+import { VideoWithVisibility } from '@/components/VideoWithVisibility';
 import {
   extractImages,
   extractVideos,
@@ -230,12 +231,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
               {/* ── Videos ── */}
               {videos.length > 0 && (
                 <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                  <video
-                    src={videos[0]}
-                    controls
-                    preload="none"
-                    className="w-full max-h-96 object-contain bg-black"
-                  />
+                  <VideoWithVisibility src={videos[0]} />
                 </div>
               )}
 
