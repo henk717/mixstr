@@ -11,7 +11,7 @@ import {
   mergeSpamSettings,
   type SpamSettings,
 } from '@/lib/spam';
-import { useMixstrSync, type MixstrConfig, type PubkeyMismatchInfo } from '@/hooks/useMixstrBackup';
+import { useMixstrSync, type MixstrConfig, type PubkeyMismatchInfo, clearLocalOwnerPubkey, setLocalOwnerPubkey } from '@/hooks/useMixstrBackup';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
   AlertDialog,
@@ -88,21 +88,26 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
 
     activePubkeyRef.current = newPubkey;
 
-    // If remote config was already merged for this account, don't overwrite it
-    // with the local copy (the remote may be newer).
-    if (newPubkey && newPubkey === remoteLoadedForPubkey.current) {
-      return;
+    // Clear the ownerPubkey tracking for this account so the sync hook can
+    // re-initialize it properly. This prevents stale ownerPubkey values from
+    // blocking the remote config from loading.
+    if (newPubkey) {
+      clearLocalOwnerPubkey(newPubkey);
     }
 
-    // Load the lists that belong to this account (or defaults if none stored)
-    const lists = loadSidebarLists(newPubkey);
-    setSidebarListsState(lists);
-
-    // Load spam settings for this account
-    setSpamSettingsState(loadSpamSettings(newPubkey));
-
+    // Reset to defaults immediately - don't load localStorage yet
+    // Wait for remote config to load before applying
+    const defaultLists = loadSidebarLists(undefined);
+    setSidebarListsState(defaultLists);
+    
+    const defaultSpam = loadSpamSettings(undefined);
+    setSpamSettingsState(defaultSpam);
+    
     // Reset view modes — they'll be restored from the Nostr backup if available
     setFeedViewModes({});
+    
+    // Reset the remote loaded flag so the sync hook can apply the remote config
+    remoteLoadedForPubkey.current = undefined;
   }, [user?.pubkey]);
 
   const setFeedViewMode = useCallback((feedKey: string, mode: FeedViewMode) => {
@@ -125,47 +130,32 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     setTimeout(() => scheduleBackupRef.current(), 0);
   }, []);
 
-  // Called when the remote Nostr config is fetched and newer than local
+  // Called when the remote Nostr config is fetched for the current user
   const handleRemoteLoaded = useCallback((config: MixstrConfig) => {
+    // Remote config is verified to belong to current user (ownerPubkey matches)
+    // Always load it to ensure we have the correct settings for this account
+    const currentPubkey = activePubkeyRef.current;
+    
     setSidebarListsState((local) => {
-      // Normalize local timestamps to seconds before comparing (legacy lists may be ms)
-      const remoteTs = config.savedAt ?? 0;
-      const localMaxTs = Math.max(
-        ...local.map((l) => (l.createdAt && l.createdAt > 1e12 ? Math.floor(l.createdAt / 1000) : l.createdAt ?? 0)),
-        0,
-      );
-      if (remoteTs > localMaxTs) {
-        const normalized = config.sidebarLists.map((l) => ({
-          ...l,
-          createdAt: l.createdAt && l.createdAt > 1e12 ? Math.floor(l.createdAt / 1000) : l.createdAt ?? 0,
-        }));
-        saveSidebarLists(normalized, activePubkeyRef.current);
-        remoteLoadedForPubkey.current = activePubkeyRef.current;
-        return normalized;
-      }
-      return local;
+      const normalized = config.sidebarLists.map((l) => ({
+        ...l,
+        createdAt: l.createdAt && l.createdAt > 1e12 ? Math.floor(l.createdAt / 1000) : l.createdAt ?? 0,
+      }));
+      saveSidebarLists(normalized, currentPubkey);
+      remoteLoadedForPubkey.current = currentPubkey;
+      return normalized;
     });
-    setFeedViewModes((local) => {
-      const remoteTs = config.savedAt ?? 0;
-      // Simple heuristic: only override if remote was saved after any local timestamp
-      // Use the remote view modes only if we have nothing local
-      if (Object.keys(local).length === 0 && remoteTs > 0) {
-        return config.feedViewModes ?? local;
-      }
-      return local;
-    });
+    setFeedViewModes(config.feedViewModes ?? {});
     setSpamSettingsState((local) => {
-      const remoteTs = config.savedAt ?? 0;
-      if (remoteTs > 0 && config.spamSettings) {
+      if (config.spamSettings) {
         const merged = mergeSpamSettings(config.spamSettings);
-        saveSpamSettings(merged, activePubkeyRef.current);
+        saveSpamSettings(merged, currentPubkey);
         return merged;
       }
       return local;
     });
     setLastNotificationReadAt((local) => {
-      const remoteTs = config.savedAt ?? 0;
-      if (remoteTs > 0 && config.lastNotificationReadAt && config.lastNotificationReadAt > local) {
+      if (config.lastNotificationReadAt && config.lastNotificationReadAt > local) {
         return config.lastNotificationReadAt;
       }
       return local;
@@ -184,6 +174,11 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const handleKeepLocalSettings = useCallback(() => {
     if (!mismatchInfo || !activePubkeyRef.current) return;
 
+    const currentPubkey = activePubkeyRef.current;
+    
+    // Set the local ownerPubkey to current user
+    setLocalOwnerPubkey(currentPubkey, currentPubkey);
+    
     // Local settings are already in place, just need to save them to Nostr
     // This will overwrite the cloud settings with the current account's data
     scheduleBackupRef.current();
@@ -206,6 +201,9 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     // We need to trigger a fresh fetch and then apply the remote config
     const currentPubkey = activePubkeyRef.current;
 
+    // Clear the local ownerPubkey so it can be re-synced from remote
+    clearLocalOwnerPubkey(currentPubkey);
+
     // Clear local settings for this account
     const defaultLists = loadSidebarLists(undefined);
     setSidebarListsState(defaultLists);
@@ -219,9 +217,8 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
 
     setLastNotificationReadAt(0);
 
-    // Now trigger a fresh fetch of the remote config
-    // The remote config will be applied through the normal sync flow
-    remoteLoadedForPubkey.current = currentPubkey;
+    // Reset the remote loaded flag so the sync hook can re-apply the remote config
+    remoteLoadedForPubkey.current = undefined;
 
     // Show info toast
     toast({

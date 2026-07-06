@@ -23,6 +23,7 @@ import type { FeedViewMode } from '@/contexts/MixstrContext';
 import type { SpamSettings } from '@/lib/spam';
 
 const D_TAG = 'mixstr-config-v1';
+const LOCAL_OWNER_PUBKEY_KEY = 'mixstr:owner-pubkey';
 
 export interface MixstrConfig {
   ownerPubkey: string;
@@ -33,6 +34,37 @@ export interface MixstrConfig {
   savedAt: number;
 }
 
+/** Get the local ownerPubkey for the current account */
+export function getLocalOwnerPubkey(pubkey?: string): string | null {
+  if (!pubkey) return null;
+  try {
+    const key = `mixstr:owner-pubkey:${pubkey}`;
+    return localStorage.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set the local ownerPubkey for the current account */
+export function setLocalOwnerPubkey(pubkey: string, ownerPubkey: string): void {
+  try {
+    const key = `mixstr:owner-pubkey:${pubkey}`;
+    localStorage.setItem(key, ownerPubkey);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** Clear the local ownerPubkey for the current account */
+export function clearLocalOwnerPubkey(pubkey: string): void {
+  try {
+    const key = `mixstr:owner-pubkey:${pubkey}`;
+    localStorage.removeItem(key);
+  } catch {
+    // ignore storage errors
+  }
+}
+
 export interface MixstrRemoteConfigResult {
   config: MixstrConfig | null;
   ownerPubkeyMismatch: boolean;
@@ -40,25 +72,33 @@ export interface MixstrRemoteConfigResult {
 }
 
 /** Fetch + decrypt the remote config from Nostr */
-export function useMixstrRemoteConfig() {
+export function useMixstrRemoteConfig(options?: { forceFresh?: boolean }) {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
 
   return useQuery<MixstrRemoteConfigResult>({
-    queryKey: ['nostr', 'mixstr-config', user?.pubkey ?? ''],
+    queryKey: ['nostr', 'mixstr-config', user?.pubkey ?? '', options?.forceFresh ? 'fresh' : 'cached'],
     queryFn: async ({ signal }) => {
       if (!user) return { config: null, ownerPubkeyMismatch: false, remoteOwnerPubkey: null };
 
-      const [event] = await nostr.query(
-        [{ kinds: [30078], authors: [user.pubkey], '#d': [D_TAG], limit: 1 }],
+      // Query all relays to get the newest event (not just the first relay that responds)
+      const events = await nostr.query(
+        [{ kinds: [30078], authors: [user.pubkey], '#d': [D_TAG], limit: 5 }],
         { signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]) },
       );
 
-      if (!event?.content) return { config: null, ownerPubkeyMismatch: false, remoteOwnerPubkey: null };
+      // Get the newest event by created_at timestamp
+      const newestEvent = events.length > 0 
+        ? events.reduce((newest, current) => 
+            current.created_at > newest.created_at ? current : newest
+          )
+        : null;
+
+      if (!newestEvent?.content) return { config: null, ownerPubkeyMismatch: false, remoteOwnerPubkey: null };
       if (!user.signer.nip44) return { config: null, ownerPubkeyMismatch: false, remoteOwnerPubkey: null };
 
       try {
-        const plaintext = await user.signer.nip44.decrypt(user.pubkey, event.content);
+        const plaintext = await user.signer.nip44.decrypt(user.pubkey, newestEvent.content);
         const parsed = JSON.parse(plaintext) as MixstrConfig;
         const ownerPubkeyMismatch = parsed.ownerPubkey && parsed.ownerPubkey !== user.pubkey;
         return {
@@ -71,7 +111,9 @@ export function useMixstrRemoteConfig() {
       }
     },
     enabled: !!user?.pubkey,
-    staleTime: 5 * 60 * 1000,
+    staleTime: options?.forceFresh ? 0 : 10 * 1000, // Force fresh fetch or use 10s cache
+    refetchInterval: options?.forceFresh ? false : 10 * 1000, // Poll every 10 seconds unless force fresh
+    refetchOnWindowFocus: true, // Refetch when window is focused
     retry: 1,
   });
 }
@@ -117,6 +159,18 @@ export interface PubkeyMismatchInfo {
  * Full sync hook — call once in MixstrProvider.
  * Returns { isSyncing, lastSynced, syncError, pubkeyMismatchInfo }.
  *
+ * Sync strategy:
+ * 1. Check local ownerPubkey for the current user
+ * 2. If local ownerPubkey is missing:
+ *    - Fetch remote config
+ *    - If remote exists, load it and set local ownerPubkey to remote's owner
+ *    - If remote doesn't exist, set local ownerPubkey to current user's pubkey
+ * 3. If local ownerPubkey exists but doesn't match current user:
+ *    - Don't save to remote (settings belong to another account)
+ *    - Report mismatch
+ * 4. If local ownerPubkey matches current user:
+ *    - Normal sync behavior (fetch remote, save to remote on changes)
+ *
  * Consumers should call `scheduleBackup(config)` whenever
  * lists or view modes change.
  */
@@ -136,39 +190,77 @@ export function useMixstrSync({
   onPubkeyMismatch: (mismatchInfo: PubkeyMismatchInfo) => void;
 }) {
   const { user } = useCurrentUser();
-  const { data: remoteData, status: fetchStatus } = useMixstrRemoteConfig();
+  const forceFreshRef = useRef(false);
+  const { data: remoteData, status: fetchStatus, refetch } = useMixstrRemoteConfig({ forceFresh: forceFreshRef.current });
   const { mutateAsync: save, isPending: isSaving, error: saveError } = useSaveMixstrConfig();
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hasLoadedRemote = useRef(false);
+  const hasInitializedSync = useRef(false);
   const hasReportedMismatch = useRef(false);
   const queryClient = useQueryClient();
 
   const remoteConfig = remoteData?.config ?? null;
-  const ownerPubkeyMismatch = remoteData?.ownerPubkeyMismatch ?? false;
+  const remoteOwnerPubkeyMismatch = remoteData?.ownerPubkeyMismatch ?? false;
   const remoteOwnerPubkey = remoteData?.remoteOwnerPubkey ?? null;
 
-  // Reset flags when user changes so we re-apply the remote config
-  // for the newly active account.
+  // Get local ownerPubkey for current user
+  const localOwnerPubkey = user?.pubkey ? getLocalOwnerPubkey(user.pubkey) : null;
+
+  // Reset flags when user changes so we re-initialize sync for the new account
   useEffect(() => {
-    hasLoadedRemote.current = false;
+    hasInitializedSync.current = false;
     hasReportedMismatch.current = false;
+    forceFreshRef.current = true; // Force fresh fetch on next render
     // When the user changes (login / logout / switch) immediately invalidate
     // the query so the new account's config is fetched fresh.
     queryClient.invalidateQueries({ queryKey: ['nostr', 'mixstr-config'] });
+    // Force a fresh fetch from all relays
+    refetch();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.pubkey]);
 
-  // On first successful remote fetch (per account), handle pubkey mismatch or merge remote → local
+  // Initialize sync: handle local ownerPubkey logic
+  // Wait for the remote query to complete before initializing
   useEffect(() => {
-    if (!remoteConfig || hasLoadedRemote.current) return;
+    if (!user?.pubkey || hasInitializedSync.current) return;
+    if (fetchStatus === 'pending') return; // Wait for query to complete
     
-    hasLoadedRemote.current = true;
+    hasInitializedSync.current = true;
+    forceFreshRef.current = false; // Reset the force fresh flag
 
-    // Check for pubkey mismatch
-    if (ownerPubkeyMismatch && remoteOwnerPubkey && user?.pubkey) {
+    // Case 1: Local ownerPubkey is missing - need to initialize it
+    if (!localOwnerPubkey) {
+      // Check if remote config exists
+      if (remoteConfig && remoteOwnerPubkey) {
+        // Remote exists: load it and set local ownerPubkey to remote's owner
+        setLocalOwnerPubkey(user.pubkey, remoteOwnerPubkey);
+        
+        // If remote owner doesn't match current user, report mismatch
+        if (remoteOwnerPubkey !== user.pubkey) {
+          const mismatchInfo: PubkeyMismatchInfo = {
+            isMismatch: true,
+            remoteOwnerPubkey,
+            localPubkey: user.pubkey,
+          };
+          hasReportedMismatch.current = true;
+          onPubkeyMismatch(mismatchInfo);
+        } else {
+          // Remote owner matches current user, load the config
+          onRemoteLoaded(remoteConfig);
+        }
+      } else {
+        // Remote doesn't exist: set local ownerPubkey to current user
+        setLocalOwnerPubkey(user.pubkey, user.pubkey);
+        // No remote config to load, use local defaults
+      }
+      return;
+    }
+
+    // Case 2: Local ownerPubkey exists but doesn't match current user
+    if (localOwnerPubkey !== user.pubkey) {
+      // Settings belong to another account - don't save to remote
       const mismatchInfo: PubkeyMismatchInfo = {
         isMismatch: true,
-        remoteOwnerPubkey,
+        remoteOwnerPubkey: localOwnerPubkey,
         localPubkey: user.pubkey,
       };
       hasReportedMismatch.current = true;
@@ -176,12 +268,33 @@ export function useMixstrSync({
       return;
     }
 
-    // No mismatch, load remote config normally
+    // Case 3: Local ownerPubkey matches current user - normal sync
+    // If remote config exists and is from the same owner, load it
+    if (remoteConfig && remoteOwnerPubkey === user.pubkey) {
+      onRemoteLoaded(remoteConfig);
+    }
+  }, [user?.pubkey, localOwnerPubkey, remoteConfig, remoteOwnerPubkey, fetchStatus, onRemoteLoaded, onPubkeyMismatch]);
+
+  // Continuously check for remote changes while in sync (local ownerPubkey matches user)
+  useEffect(() => {
+    if (!user?.pubkey || !localOwnerPubkey || localOwnerPubkey !== user.pubkey) return;
+    if (!remoteConfig || hasInitializedSync.current === false) return;
+
+    // Remote config exists and local owner matches user - load it
     onRemoteLoaded(remoteConfig);
-  }, [remoteConfig, ownerPubkeyMismatch, remoteOwnerPubkey, onRemoteLoaded, onPubkeyMismatch, user?.pubkey]);
+  }, [remoteConfig, user?.pubkey, localOwnerPubkey, onRemoteLoaded]);
 
   const scheduleBackup = useCallback(() => {
     if (!user) return;
+    
+    // Get current local ownerPubkey
+    const currentLocalOwner = getLocalOwnerPubkey(user.pubkey);
+    
+    // Don't save to remote if local ownerPubkey doesn't match current user
+    if (currentLocalOwner && currentLocalOwner !== user.pubkey) {
+      return;
+    }
+    
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(async () => {
       const config: MixstrConfig = {
@@ -209,8 +322,8 @@ export function useMixstrSync({
     syncError: saveError,
     scheduleBackup,
     pubkeyMismatchInfo: {
-      isMismatch: ownerPubkeyMismatch,
-      remoteOwnerPubkey,
+      isMismatch: localOwnerPubkey ? localOwnerPubkey !== user?.pubkey : false,
+      remoteOwnerPubkey: localOwnerPubkey ?? remoteOwnerPubkey,
       localPubkey: user?.pubkey ?? null,
     },
   };
