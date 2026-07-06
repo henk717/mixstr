@@ -11,8 +11,20 @@ import {
   mergeSpamSettings,
   type SpamSettings,
 } from '@/lib/spam';
-import { useMixstrSync, type MixstrConfig } from '@/hooks/useMixstrBackup';
+import { useMixstrSync, type MixstrConfig, type PubkeyMismatchInfo } from '@/hooks/useMixstrBackup';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useToast } from '@/hooks/useToast';
+import { nip19 } from 'nostr-tools';
 
 function MixstrSyncInner({
   sidebarLists,
@@ -20,6 +32,7 @@ function MixstrSyncInner({
   spamSettings,
   lastNotificationReadAt,
   onRemoteLoaded,
+  onPubkeyMismatch,
   onScheduleBackup,
 }: {
   sidebarLists: SidebarList[];
@@ -27,9 +40,10 @@ function MixstrSyncInner({
   spamSettings: SpamSettings;
   lastNotificationReadAt: number;
   onRemoteLoaded: (config: MixstrConfig) => void;
+  onPubkeyMismatch: (mismatchInfo: PubkeyMismatchInfo) => void;
   onScheduleBackup: (fn: () => void) => void;
 }) {
-  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, spamSettings, lastNotificationReadAt, onRemoteLoaded });
+  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, spamSettings, lastNotificationReadAt, onRemoteLoaded, onPubkeyMismatch });
 
   // Expose scheduleBackup up to parent on each render
   useEffect(() => {
@@ -61,6 +75,9 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const [audioDuration, setAudioDuration] = useState(0);
   const currentIndexRef = useRef<number>(-1);
   const scheduleBackupRef = useRef<() => void>(() => {});
+  const [showMismatchDialog, setShowMismatchDialog] = useState(false);
+  const [mismatchInfo, setMismatchInfo] = useState<PubkeyMismatchInfo | null>(null);
+  const { toast } = useToast();
 
   // ── Reload lists when the active account changes ──────────────────────────
   // This runs whenever `user` changes (login / logout / switch).
@@ -154,6 +171,67 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
       return local;
     });
   }, []);
+
+  // Called when a pubkey mismatch is detected
+  const handlePubkeyMismatch = useCallback((mismatchInfo: PubkeyMismatchInfo) => {
+    if (mismatchInfo.isMismatch && mismatchInfo.remoteOwnerPubkey && mismatchInfo.localPubkey) {
+      setMismatchInfo(mismatchInfo);
+      setShowMismatchDialog(true);
+    }
+  }, []);
+
+  // Handle user keeping local settings and overwriting cloud
+  const handleKeepLocalSettings = useCallback(() => {
+    if (!mismatchInfo || !activePubkeyRef.current) return;
+
+    // Local settings are already in place, just need to save them to Nostr
+    // This will overwrite the cloud settings with the current account's data
+    scheduleBackupRef.current();
+
+    // Show success toast
+    toast({
+      title: 'Settings synced',
+      description: 'Your local settings have been saved to the cloud and will now be associated with your current account.',
+    });
+
+    setShowMismatchDialog(false);
+    setMismatchInfo(null);
+  }, [mismatchInfo, scheduleBackupRef, toast]);
+
+  // Handle user loading remote settings from cloud
+  const handleLoadRemoteSettings = useCallback(() => {
+    if (!mismatchInfo || !activePubkeyRef.current) return;
+
+    // Fetch the remote config again and load it
+    // We need to trigger a fresh fetch and then apply the remote config
+    const currentPubkey = activePubkeyRef.current;
+
+    // Clear local settings for this account
+    const defaultLists = loadSidebarLists(undefined);
+    setSidebarListsState(defaultLists);
+    saveSidebarLists(defaultLists, currentPubkey);
+
+    setFeedViewModes({});
+
+    const defaultSpam = loadSpamSettings(undefined);
+    setSpamSettingsState(defaultSpam);
+    saveSpamSettings(defaultSpam, currentPubkey);
+
+    setLastNotificationReadAt(0);
+
+    // Now trigger a fresh fetch of the remote config
+    // The remote config will be applied through the normal sync flow
+    remoteLoadedForPubkey.current = currentPubkey;
+
+    // Show info toast
+    toast({
+      title: 'Remote settings loaded',
+      description: 'Your settings from the cloud have been loaded. Local settings have been replaced.',
+    });
+
+    setShowMismatchDialog(false);
+    setMismatchInfo(null);
+  }, [mismatchInfo, activePubkeyRef, toast]);
 
   // Sidebar list management
   const setSidebarLists = useCallback((lists: SidebarList[]) => {
@@ -288,8 +366,49 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
         spamSettings={spamSettings}
         lastNotificationReadAt={lastNotificationReadAt}
         onRemoteLoaded={handleRemoteLoaded}
+        onPubkeyMismatch={handlePubkeyMismatch}
         onScheduleBackup={(fn) => { scheduleBackupRef.current = fn; }}
       />
+
+      {/* Pubkey Mismatch Dialog */}
+      <AlertDialog open={showMismatchDialog} onOpenChange={setShowMismatchDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Settings Sync Conflict Detected</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p>
+                The settings stored in the cloud belong to a different account than your current one.
+              </p>
+              <div className="space-y-2 text-sm">
+                <p><strong>Your current account:</strong></p>
+                <p className="font-mono break-all text-muted-foreground">
+                  {mismatchInfo?.localPubkey 
+                    ? nip19.npubEncode(mismatchInfo.localPubkey) 
+                    : 'Unknown'}
+                </p>
+                <p><strong>Cloud settings owner:</strong></p>
+                <p className="font-mono break-all text-muted-foreground">
+                  {mismatchInfo?.remoteOwnerPubkey 
+                    ? nip19.npubEncode(mismatchInfo.remoteOwnerPubkey) 
+                    : 'Unknown'}
+                </p>
+              </div>
+              <p className="pt-2">
+                Please choose how you'd like to resolve this:
+              </p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel onClick={handleLoadRemoteSettings}>
+              Load Cloud Settings
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleKeepLocalSettings}>
+              Keep Local Settings
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {children}
     </MixstrContext.Provider>
   );
