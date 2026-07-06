@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNostr } from '@nostrify/react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Home,
@@ -17,6 +18,7 @@ import {
   UserPlus,
   ChevronDown,
   Wifi,
+  Feather,
 } from 'lucide-react';
 import { useRelayMonitor } from '@/hooks/useRelayMonitor';
 import { RelayMonitorDialog } from '@/components/RelayMonitorDialog';
@@ -44,6 +46,7 @@ import type { SidebarList } from '@/lib/sidebarLists';
 import { createListId, listTimestamp } from '@/lib/sidebarLists';
 import { nip19 } from 'nostr-tools';
 import { EmojifiedText } from '@/components/CustomEmoji';
+import { ComposeDialog } from '@/components/feed/ComposeDialog';
 
 // The static navigation items always present at the top
 const STATIC_NAV = [
@@ -100,6 +103,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [editDialog, setEditDialog] = useState<{ open: boolean; list?: SidebarList }>({ open: false });
   const [authOpen, setAuthOpen] = useState(false);
   const [relayMonitorOpen, setRelayMonitorOpen] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
   const { connectedCount, totalCount } = useRelayMonitor();
 
   const npub = user ? nip19.npubEncode(user.pubkey) : null;
@@ -119,21 +123,30 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex flex-col h-full p-3 gap-0.5">
-      {/* Logo */}
-      <Link
-        to="/"
-        className="flex items-center gap-2.5 px-3 py-4 mb-1"
-        onClick={onNavigate}
-      >
-        <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0 shadow-md shadow-primary/30">
-          <span className="text-primary-foreground font-black text-sm">M</span>
-        </div>
-        <span className="font-black text-xl tracking-tight text-foreground">
-          Mix<span className="text-primary">str</span>
-        </span>
-      </Link>
+       {/* Logo */}
+       <Link
+         to="/"
+         className="flex items-center gap-2.5 px-3 py-4 mb-1"
+         onClick={onNavigate}
+       >
+         <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0 shadow-md shadow-primary/30">
+           <span className="text-primary-foreground font-black text-sm">M</span>
+         </div>
+         <span className="font-black text-xl tracking-tight text-foreground">
+           Mix<span className="text-primary">str</span>
+         </span>
+       </Link>
 
-      {/* Static nav */}
+       {/* New Post button */}
+       <button
+         onClick={() => { setComposeOpen(true); onNavigate?.(); }}
+         className="flex items-center gap-3 px-3 py-3 rounded-xl font-semibold text-sm w-full text-left bg-orange-500 hover:bg-orange-600 text-white shadow-md transition-all duration-150 mb-1"
+       >
+         <Feather size={18} />
+         New Post
+       </button>
+
+       {/* Static nav */}
 {STATIC_NAV.map((item) => (
          <Link
            key={item.to}
@@ -445,8 +458,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         }}
       />
 
-      {/* Add / switch account dialog */}
-      <AuthDialog isOpen={authOpen} onClose={() => setAuthOpen(false)} />
-    </div>
-  );
-}
+       {/* Add / switch account dialog */}
+       <AuthDialog isOpen={authOpen} onClose={() => setAuthOpen(false)} />
+
+       {/* Compose dialog */}
+       <ComposeDialog open={composeOpen} onClose={() => setComposeOpen(false)} />
+     </div>
+   );
+ }

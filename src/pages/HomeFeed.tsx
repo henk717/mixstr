@@ -121,24 +121,14 @@ export function HomeFeed() {
         fetchNextPage={fetchNextPage}
       />
 
-      {!isLoading && following.length === 0 && (
-        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-          You're not following anyone yet. Find people to follow to populate your feed.
-        </div>
-      )}
+       {!isLoading && following.length === 0 && (
+         <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+           You're not following anyone yet. Find people to follow to populate your feed.
+         </div>
+       )}
 
-      {/* Floating Action Button — Twitter-style new post (always visible) */}
-      <button
-        onClick={() => setComposeOpen(true)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/40 flex items-center justify-center hover:scale-105 active:scale-95 transition-transform motion-reduce:transition-none"
-        title="New post"
-        aria-label="New post"
-      >
-        <Feather size={22} />
-      </button>
-
-      {/* Compose dialog */}
-      <ComposeDialog open={composeOpen} onClose={() => setComposeOpen(false)} />
-    </div>
-  );
-}
+       {/* Compose dialog */}
+       <ComposeDialog open={composeOpen} onClose={() => setComposeOpen(false)} />
+     </div>
+   );
+ }
