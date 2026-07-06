@@ -4,13 +4,9 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useAppContext } from '@/hooks/useAppContext';
 
 const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
-const PAGE_SIZE = 100;
-/**
- * Fallback poll interval for new events. Live subscriptions deliver new events
- * instantly; this poll catches anything the subscription might miss (e.g. after
- * reconnects).
- */
-const NEWER_POLL_INTERVAL = 3_000;
+const PAGE_SIZE = 250;
+/** Per-relay query timeout. Slow/stuck relays get marked done quickly. */
+const QUERY_TIMEOUT = 4_000;
 
 interface RelayCursor {
   oldest?: number;
@@ -44,17 +40,18 @@ type RelayMsg =
  *
  * Strategy:
  *  - A live subscription is opened on each read relay so new events arrive
- *    immediately without waiting for a poll cycle.
+ *    immediately, replacing any polling.
+ *  - Older history is backfilled page-by-page as fast as relays respond.
  *  - Each relay is paginated independently with its own `until` cursor so a
  *    slow or sparse relay never holds up the others.
  *  - Older fetches use the current oldest timestamp **inclusively** (rather
  *    than `oldest - 1`) so events that share a timestamp are not skipped.
- *  - We de-duplicate by event ID; a relay is considered exhausted only when a
- *    request returns no new IDs. If a full page of duplicates comes back, we
- *    probe one second below the current oldest cursor to make sure there isn't
- *    a wall of older history behind them.
- *  - A 5-second background crawl fills older history automatically.
- *  - A 3-second fallback poll catches edge cases like reconnects.
+ *  - A relay is considered exhausted only when it stops returning new event
+ *    IDs. If a full page of duplicates comes back, we probe one second below
+ *    the current oldest cursor to make sure there isn't a wall of older
+ *    history behind them.
+ *  - Per-relay requests use a short timeout so unresponsive relays don't stall
+ *    the whole feed.
  */
 export function useProfileFeed(pubkey: string) {
   const { nostr } = useNostr();
@@ -67,7 +64,6 @@ export function useProfileFeed(pubkey: string) {
 
   const seenIdsRef = useRef<Set<string>>(new Set());
   const fetchingOlderRef = useRef(false);
-  const fetchingNewerRef = useRef(false);
   const perRelayCursorRef = useRef<Map<string, RelayCursor>>(new Map());
 
   const readRelays = useMemo(
@@ -143,14 +139,13 @@ export function useProfileFeed(pubkey: string) {
   const querySingleRelay = useCallback(async (
     url: string,
     filter: FilterSpec,
-    timeoutMs: number,
   ): Promise<NostrEvent[]> => {
     if (!url) {
-      return nostr.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+      return nostr.query([filter], { signal: AbortSignal.timeout(QUERY_TIMEOUT) });
     }
     try {
       const relay = nostr.relay(url);
-      return await relay.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+      return await relay.query([filter], { signal: AbortSignal.timeout(QUERY_TIMEOUT) });
     } catch {
       return [];
     }
@@ -162,12 +157,11 @@ export function useProfileFeed(pubkey: string) {
    */
   const queryEachRelay = useCallback(async (
     makeFilter: (url: string, cursor: RelayCursor | undefined) => FilterSpec,
-    timeoutMs: number,
   ): Promise<PerRelayResult[]> => {
     if (readRelays.length === 0) {
       const cursor = perRelayCursorRef.current.get('');
       const filter = makeFilter('', cursor);
-      const batch = await querySingleRelay('', filter, timeoutMs);
+      const batch = await querySingleRelay('', filter);
       return [{ url: '', events: batch }];
     }
 
@@ -175,7 +169,7 @@ export function useProfileFeed(pubkey: string) {
       readRelays.map(async (url) => {
         const cursor = perRelayCursorRef.current.get(url);
         const filter = makeFilter(url, cursor);
-        const batch = await querySingleRelay(url, filter, timeoutMs);
+        const batch = await querySingleRelay(url, filter);
         return { url, events: batch };
       }),
     );
@@ -199,7 +193,6 @@ export function useProfileFeed(pubkey: string) {
           limit: PAGE_SIZE,
           ...(cursor?.oldest !== undefined && { until: cursor.oldest }),
         }),
-        10_000,
       );
 
       let anyProgress = false;
@@ -230,7 +223,7 @@ export function useProfileFeed(pubkey: string) {
           authors: [pubkey],
           limit: PAGE_SIZE,
           until: probeUntil,
-        }, 10_000);
+        });
 
         const probeNew = probe.filter((ev) => !seenIdsRef.current.has(ev.id));
         if (probeNew.length > 0) {
@@ -248,45 +241,12 @@ export function useProfileFeed(pubkey: string) {
         setHasMore(false);
       }
     } catch {
-      // Network errors are swallowed; the next interval will retry.
+      // Network errors are swallowed; the next iteration will retry.
     } finally {
       fetchingOlderRef.current = false;
       setIsFetchingOlder(false);
     }
   }, [pubkey, hasMore, mergeEvents, queryEachRelay, querySingleRelay, refreshHasMore, expandCursor, markRelayDone, ensureCursor]);
-
-  /** Fetch events newer than the newest we have across all relays */
-  const fetchNewer = useCallback(async () => {
-    if (fetchingNewerRef.current) return;
-    fetchingNewerRef.current = true;
-
-    try {
-      const globalNewest = Array.from(perRelayCursorRef.current.values())
-        .reduce((max, c) => (c.newest !== undefined && c.newest > max ? c.newest : max), 0);
-      const since = globalNewest > 0 ? globalNewest + 1 : undefined;
-
-      const results = await queryEachRelay(
-        () => ({
-          kinds: KINDS,
-          authors: [pubkey],
-          limit: PAGE_SIZE,
-          ...(since !== undefined && { since }),
-        }),
-        8_000,
-      );
-
-      for (const { url, events: batch } of results) {
-        if (batch.length > 0) {
-          expandCursor(url, batch);
-          mergeEvents(batch);
-        }
-      }
-    } catch {
-      // silently ignore
-    } finally {
-      fetchingNewerRef.current = false;
-    }
-  }, [pubkey, mergeEvents, queryEachRelay, expandCursor]);
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -296,7 +256,6 @@ export function useProfileFeed(pubkey: string) {
     setIsFetchingOlder(false);
     seenIdsRef.current = new Set();
     fetchingOlderRef.current = false;
-    fetchingNewerRef.current = false;
     perRelayCursorRef.current = new Map();
 
     let cancelled = false;
@@ -305,7 +264,6 @@ export function useProfileFeed(pubkey: string) {
       try {
         const results = await queryEachRelay(
           () => ({ kinds: KINDS, authors: [pubkey], limit: PAGE_SIZE }),
-          10_000,
         );
 
         if (cancelled) return;
@@ -333,7 +291,7 @@ export function useProfileFeed(pubkey: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey]);
 
-  // ── Live subscription for brand-new events ─────────────────────────────────
+  // ── Live subscription for all new events ───────────────────────────────────
   useEffect(() => {
     const since = Math.floor(Date.now() / 1000) - 60;
     const filters: FilterSpec[] = [{ kinds: KINDS, authors: [pubkey], since }];
@@ -396,18 +354,12 @@ export function useProfileFeed(pubkey: string) {
     };
   }, [fetchOlder, hasMore, isLoading]);
 
-  // ── Fallback poll for newer events ───────────────────────────────────────────
-  useEffect(() => {
-    const id = setInterval(() => { void fetchNewer(); }, NEWER_POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [fetchNewer]);
-
   return {
     events,
     isLoading,
     isFetchingOlder,
     hasMore,
-    /** Manually request the next older page (e.g. on scroll-to-bottom) */
+    /** Kept for compatibility; the profile UI no longer uses scroll-to-load. */
     fetchNextPage: fetchOlder,
   };
 }
