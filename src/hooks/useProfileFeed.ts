@@ -6,33 +6,42 @@ import { useAppContext } from '@/hooks/useAppContext';
 const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
 const PAGE_SIZE = 30;
 /**
- * How often (ms) to poll for newer + older events while the profile page is mounted.
- * We stagger the two directions so they don't both fire at the same time.
+ * How often (ms) to poll for newer events while the profile page is mounted.
  */
-const NEWER_POLL_INTERVAL = 12_000;   // 12 s — check for brand-new posts
-const OLDER_POLL_INTERVAL = 20_000;   // 20 s — keep fetching the next history page
+const NEWER_POLL_INTERVAL = 12_000;
 
-interface FetchWindow {
-  oldest: number | undefined;
-  newest: number | undefined;
+interface RelayCursor {
+  oldest?: number;
+  newest?: number;
+  hasMore: boolean;
+}
+
+interface FilterSpec {
+  kinds: number[];
+  authors: string[];
+  limit: number;
+  until?: number;
+  since?: number;
+}
+
+interface PerRelayResult {
+  url: string;
+  events: NostrEvent[];
 }
 
 /**
  * useProfileFeed
  *
- * Persistently fetches a profile's events while mounted.
+ * Fetches a profile's full event history from every configured read relay.
  *
  * Strategy:
- *  – Query every configured read relay individually and asynchronously so one
- *    slow or stale relay never suppresses events that only exist on another.
- *  – Initial load: fetch `limit` events ending now from each relay, merge unique IDs.
- *  – "Newer" poll (NEWER_POLL_INTERVAL): fetch events since the latest we have.
- *    Prepends new items to the accumulated list.
- *  – "Older" crawl (OLDER_POLL_INTERVAL): advance the cursor and fetch the next
- *    page back in history.  Stops when every relay has returned an empty page.
- *  – Manual `fetchNextPage`: user-triggered fetch of the next older page.
- *
- * Events are de-duplicated by ID and sorted newest-first.
+ *  - Each relay is paginated independently with its own `until` cursor so a
+ *    slow or sparse relay never advances the global cursor past data that
+ *    another relay still needs to return.
+ *  - The feed keeps fetching older pages as long as any relay reports more
+ *    events, eliminating the time gaps caused by the old global-page logic.
+ *  - A background poll checks for brand-new posts and prepends them.
+ *  - Events are de-duplicated by ID and sorted newest-first.
  */
 export function useProfileFeed(pubkey: string) {
   const { nostr } = useNostr();
@@ -44,22 +53,20 @@ export function useProfileFeed(pubkey: string) {
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(true);
 
-  // oldest/newest created_at we've successfully loaded
-  const oldestRef = useRef<number | undefined>(undefined);
-  const newestRef = useRef<number | undefined>(undefined);
-  // set of event IDs we already have
   const seenIdsRef = useRef<Set<string>>(new Set());
-  // guard against concurrent fetches in the same direction
   const fetchingOlderRef = useRef(false);
   const fetchingNewerRef = useRef(false);
+  const perRelayCursorRef = useRef<Map<string, RelayCursor>>(new Map());
 
   /** Read-relay URLs from the user's NIP-65 list */
   const readRelays = config.relayMetadata.relays
     .filter((r) => r.read)
     .map((r) => r.url);
 
-  /** Merge new events into state, deduplicated and sorted */
+  /** Merge new events into state, de-duplicated and sorted */
   const mergeEvents = useCallback((incoming: NostrEvent[]) => {
+    if (incoming.length === 0) return;
+
     setEvents((prev) => {
       let added = false;
       const next = [...prev];
@@ -68,13 +75,6 @@ export function useProfileFeed(pubkey: string) {
           seenIdsRef.current.add(ev.id);
           next.push(ev);
           added = true;
-          // update cursors
-          if (newestRef.current === undefined || ev.created_at > newestRef.current) {
-            newestRef.current = ev.created_at;
-          }
-          if (oldestRef.current === undefined || ev.created_at < oldestRef.current) {
-            oldestRef.current = ev.created_at;
-          }
         }
       }
       if (!added) return prev;
@@ -82,60 +82,87 @@ export function useProfileFeed(pubkey: string) {
     });
   }, []);
 
-  /**
-   * Query each configured read relay independently, then merge unique results.
-   * Use the per-relay query timeout so a single stalled relay doesn't hold up
-   * events from others.
-   */
-  const queryAllReadRelays = useCallback(async (
-    makeFilter: (window: FetchWindow) => { kinds: number[]; authors: string[]; limit: number; until?: number; since?: number },
-    timeoutMs: number,
-  ): Promise<NostrEvent[]> => {
-    if (readRelays.length === 0) {
-      return nostr.query([{ kinds: KINDS, authors: [pubkey], limit: PAGE_SIZE }], { signal: AbortSignal.timeout(timeoutMs) });
+  /** Update per-relay cursors from the events that relay just returned */
+  const updateRelayCursor = useCallback((url: string, batch: NostrEvent[]) => {
+    const cursor = perRelayCursorRef.current.get(url) ?? { hasMore: true };
+
+    for (const ev of batch) {
+      if (cursor.oldest === undefined || ev.created_at < cursor.oldest) {
+        cursor.oldest = ev.created_at;
+      }
+      if (cursor.newest === undefined || ev.created_at > cursor.newest) {
+        cursor.newest = ev.created_at;
+      }
     }
 
-    const window: FetchWindow = {
-      oldest: oldestRef.current,
-      newest: newestRef.current,
-    };
-    const filter = makeFilter(window);
+    if (batch.length === 0) {
+      cursor.hasMore = false;
+    }
 
-    const relays = await Promise.allSettled(
+    perRelayCursorRef.current.set(url, cursor);
+  }, []);
+
+  /** Recompute global hasMore from per-relay state */
+  const refreshHasMore = useCallback(() => {
+    if (readRelays.length === 0) {
+      const cursor = perRelayCursorRef.current.get('');
+      setHasMore(cursor?.hasMore ?? false);
+      return;
+    }
+    let anyHasMore = false;
+    for (const url of readRelays) {
+      if (perRelayCursorRef.current.get(url)?.hasMore) {
+        anyHasMore = true;
+        break;
+      }
+    }
+    setHasMore(anyHasMore);
+  }, [readRelays]);
+
+  /**
+   * Query each configured read relay individually. Returns each relay's
+   * results separately so callers can update per-relay cursors.
+   */
+  const queryEachRelay = useCallback(async (
+    makeFilter: (url: string, cursor: RelayCursor | undefined) => FilterSpec,
+    timeoutMs: number,
+  ): Promise<PerRelayResult[]> => {
+    if (readRelays.length === 0) {
+      const cursor = perRelayCursorRef.current.get('');
+      const filter = makeFilter('', cursor);
+      const batch = await nostr.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+      return [{ url: '', events: batch }];
+    }
+
+    const settled = await Promise.allSettled(
       readRelays.map(async (url) => {
+        const cursor = perRelayCursorRef.current.get(url);
+        const filter = makeFilter(url, cursor);
         try {
           const relay = nostr.relay(url);
-          return await relay.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+          const batch = await relay.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+          return { url, events: batch };
         } catch {
-          return [];
+          return { url, events: [] };
         }
       }),
     );
 
-    const seen = new Set<string>();
-    const all: NostrEvent[] = [];
-    for (const result of relays) {
-      if (result.status !== 'fulfilled') continue;
-      for (const ev of result.value) {
-        if (!seen.has(ev.id)) {
-          seen.add(ev.id);
-          all.push(ev);
-        }
-      }
-    }
-    return all;
-  }, [nostr, pubkey, readRelays]);
+    return settled
+      .filter((r): r is PromiseFulfilledResult<PerRelayResult> => r.status === 'fulfilled')
+      .map((r) => r.value);
+  }, [nostr, readRelays]);
 
-  /** Fetch events older than the current cursor */
+  /** Fetch the next older page from every relay that still has history */
   const fetchOlder = useCallback(async () => {
     if (fetchingOlderRef.current || !hasMore) return;
     fetchingOlderRef.current = true;
     setIsFetchingOlder(true);
 
     try {
-      const fetched = await queryAllReadRelays(
-        (window) => {
-          const until = window.oldest !== undefined ? window.oldest - 1 : undefined;
+      const results = await queryEachRelay(
+        (_url, cursor) => {
+          const until = cursor?.oldest !== undefined ? cursor.oldest - 1 : undefined;
           return {
             kinds: KINDS,
             authors: [pubkey],
@@ -146,51 +173,61 @@ export function useProfileFeed(pubkey: string) {
         10_000,
       );
 
-      if (fetched.length === 0) {
-        setHasMore(false);
-      } else {
-        mergeEvents(fetched);
-        if (fetched.length < PAGE_SIZE) {
-          // Per convention a relay is unlikely to have more if it returned fewer
-          // than requested, but keep polling in case straggler relays arrive later.
+      let anyNew = false;
+      for (const { url, events: batch } of results) {
+        updateRelayCursor(url, batch);
+        if (batch.length > 0) {
+          anyNew = true;
+          mergeEvents(batch);
         }
       }
+
+      refreshHasMore();
+
+      // If every relay came back empty this round, there is genuinely no more.
+      if (!anyNew) {
+        setHasMore(false);
+      }
     } catch {
-      // Network errors are silently swallowed — the next interval will retry
+      // Network errors are swallowed; the next poll/scroll will retry.
     } finally {
       fetchingOlderRef.current = false;
       setIsFetchingOlder(false);
     }
-  }, [pubkey, hasMore, mergeEvents, queryAllReadRelays]);
+  }, [pubkey, hasMore, mergeEvents, queryEachRelay, refreshHasMore, updateRelayCursor]);
 
-  /** Fetch events newer than the newest we have */
+  /** Fetch events newer than the newest we have across all relays */
   const fetchNewer = useCallback(async () => {
     if (fetchingNewerRef.current) return;
     fetchingNewerRef.current = true;
 
     try {
-      const fetched = await queryAllReadRelays(
-        (window) => {
-          const since = window.newest !== undefined ? window.newest + 1 : undefined;
-          return {
-            kinds: KINDS,
-            authors: [pubkey],
-            limit: PAGE_SIZE,
-            ...(since !== undefined && { since }),
-          };
-        },
+      const globalNewest = Array.from(perRelayCursorRef.current.values())
+        .reduce((max, c) => (c.newest !== undefined && c.newest > max ? c.newest : max), 0);
+      const since = globalNewest > 0 ? globalNewest + 1 : undefined;
+
+      const results = await queryEachRelay(
+        () => ({
+          kinds: KINDS,
+          authors: [pubkey],
+          limit: PAGE_SIZE,
+          ...(since !== undefined && { since }),
+        }),
         8_000,
       );
 
-      if (fetched.length > 0) mergeEvents(fetched);
+      for (const { url, events: batch } of results) {
+        updateRelayCursor(url, batch);
+        if (batch.length > 0) mergeEvents(batch);
+      }
     } catch {
       // silently ignore
     } finally {
       fetchingNewerRef.current = false;
     }
-  }, [pubkey, mergeEvents, queryAllReadRelays]);
+  }, [pubkey, mergeEvents, queryEachRelay, updateRelayCursor]);
 
-  // ── Initial load ──────────────────────────────────────────────────────────
+  // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     // Reset state whenever the pubkey changes
     setEvents([]);
@@ -198,23 +235,26 @@ export function useProfileFeed(pubkey: string) {
     setHasMore(true);
     setIsFetchingOlder(false);
     seenIdsRef.current = new Set();
-    oldestRef.current = undefined;
-    newestRef.current = undefined;
     fetchingOlderRef.current = false;
     fetchingNewerRef.current = false;
+    perRelayCursorRef.current = new Map();
 
     let cancelled = false;
 
     const load = async () => {
       try {
-        const fetched = await queryAllReadRelays(
+        const results = await queryEachRelay(
           () => ({ kinds: KINDS, authors: [pubkey], limit: PAGE_SIZE }),
           10_000,
         );
-        if (!cancelled) {
-          mergeEvents(fetched);
-          if (fetched.length < PAGE_SIZE) setHasMore(false);
+
+        if (cancelled) return;
+
+        for (const { url, events: batch } of results) {
+          updateRelayCursor(url, batch);
+          if (batch.length > 0) mergeEvents(batch);
         }
+        refreshHasMore();
       } catch {
         // ignore
       } finally {
@@ -228,19 +268,11 @@ export function useProfileFeed(pubkey: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey]);
 
-  // ── "Newer" polling interval ───────────────────────────────────────────────
+  // ── Background poll for brand-new posts ──────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => { void fetchNewer(); }, NEWER_POLL_INTERVAL);
     return () => clearInterval(id);
   }, [fetchNewer]);
-
-  // ── "Older" crawl interval ─────────────────────────────────────────────────
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (hasMore && !isLoading) void fetchOlder();
-    }, OLDER_POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [fetchOlder, hasMore, isLoading]);
 
   return {
     events,

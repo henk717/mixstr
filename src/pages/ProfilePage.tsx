@@ -3,7 +3,6 @@ import { useSeoMeta } from '@unhead/react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useMixstr } from '@/hooks/useMixstr';
 import { useProfileFeed } from '@/hooks/useProfileFeed';
-import { useProfileRepliesFeed } from '@/hooks/useProfileRepliesFeed';
 import { useProfileFollowing } from '@/hooks/useProfileFollowing';
 import { useFollowing } from '@/hooks/useFollowing';
 import { useFollowMutation } from '@/hooks/useFollowMutation';
@@ -194,7 +193,8 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
 
   useSeoMeta({ title: `${displayName} · Mixstr` });
 
-  // Posts-only feed (no replies to other people)
+  // Profile feed fetches all relevant event kinds from every read relay.
+  // The Posts tab filters out kind-1 replies below; this tab shows them.
   const {
     events: postEvents,
     isLoading: postsLoading,
@@ -203,16 +203,14 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
     fetchNextPage: postsFetchNext,
   } = useProfileFeed(pubkey);
 
-  // Posts + replies feed
-  const {
-    events: replyEvents,
-    isLoading: repliesLoading,
-    isFetchingOlder: repliesFetchingOlder,
-    hasMore: repliesHasMore,
-    fetchNextPage: repliesFetchNext,
-  } = useProfileRepliesFeed(pubkey);
-
+  // Replies tab is rendered from the same full feed, just without filtering.
+  const replyEvents = postEvents;
   const replyPages = useMemo(() => (replyEvents.length > 0 ? [replyEvents] : []), [replyEvents]);
+
+  const repliesLoading = postsLoading;
+  const repliesFetchingOlder = postsFetchingOlder;
+  const repliesHasMore = postsHasMore;
+  const repliesFetchNext = postsFetchNext;
 
   // ── Build a synthetic kind-0 event for ProfileAbout ──────────────────────
   // We need a real NostrEvent to pass to NoteContent, but `about` isn't a
