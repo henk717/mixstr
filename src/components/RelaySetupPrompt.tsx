@@ -9,6 +9,7 @@ import { SUGGESTED_RELAYS, DEFAULT_RELAYS } from '@/lib/appRelays';
 /** Minimal shape of the NIP-07 provider injected at `window.nostr`. */
 interface Nip07Provider {
   getPublicKey(): Promise<string>;
+  getRelays(): Promise<Map<string, { read: boolean; write: boolean }>>;
 }
 
 /** Check for NIP-07 browser extension (same logic as LoginArea) */
@@ -44,7 +45,7 @@ export function RelaySetupPrompt() {
 
   // Automatically attempt NIP-07 extension authorization after 1 second delay
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       const provider = getNip07Provider();
       
       if (!provider) {
@@ -54,32 +55,54 @@ export function RelaySetupPrompt() {
         return;
       }
 
-      const checkExtension = async () => {
-        try {
-          // Attempt to get public key from extension
-          const pubkey = await provider.getPublicKey();
-          
-          if (pubkey) {
-            // Extension granted access - NostrSync will import relays automatically
-            // Keep this screen visible until NostrSync populates relays
-            setIsLoading(false);
-            return;
-          }
-        } catch {
-          // Extension declined or errored — fall through to relay selection
+      try {
+        // First, prompt for authorization by getting public key
+        const pubkey = await provider.getPublicKey();
+        
+        if (!pubkey) {
+          // Extension declined authorization
+          setShowRelaySelection(true);
+          setIsLoading(false);
+          return;
         }
 
-        // Fall back to relay selection
+        // Extension granted access - now fetch relays from extension
+        const relaysMap = await provider.getRelays();
+        const relays = Array.from(relaysMap.entries()).map(([url, { read, write }]) => ({
+          url,
+          read,
+          write,
+        }));
+
+        if (relays.length > 0) {
+          // Got relays from extension - update config and let NostrSync handle the rest
+          console.log('[RelaySetupPrompt] Got relays from extension:', relays);
+          updateConfig((current) => ({
+            ...current,
+            relayMetadata: {
+              relays,
+              updatedAt: Math.floor(Date.now() / 1000),
+            },
+          }));
+          // Screen will dismiss once config is updated
+          setIsLoading(false);
+          return;
+        }
+
+        // Extension has no relays configured
+        console.log('[RelaySetupPrompt] Extension has no relays configured');
         setShowRelaySelection(true);
         setIsLoading(false);
-      };
-
-      checkExtension();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
+      } catch (error) {
+        console.log('[RelaySetupPrompt] Extension check failed:', error);
+        // Extension declined or errored — fall through to relay selection
+        setShowRelaySelection(true);
+        setIsLoading(false);
+      }
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [updateConfig]);
 
   const toggleSuggested = (url: string) => {
     setSelected((prev) => {
@@ -146,7 +169,7 @@ export function RelaySetupPrompt() {
         {isLoading && (
           <div className="flex flex-col items-center justify-center py-12 space-y-4">
             <Loader2 className="w-12 h-12 text-primary animate-spin" />
-            <p className="text-sm text-muted-foreground">Checking for Nostr extension...</p>
+            <p className="text-sm text-muted-foreground">Fetching your relay configuration...</p>
           </div>
         )}
 
