@@ -3,6 +3,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useMuteList } from '@/hooks/useMuteList';
+import { useMixstr } from '@/hooks/useMixstr';
 import { useNostr } from '@nostrify/react';
 import { useQueries } from '@tanstack/react-query';
 import { LoginArea } from '@/components/auth/LoginArea';
@@ -16,6 +17,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { useEffect } from 'react';
 
 function kindIcon(kind: number) {
   switch (kind) {
@@ -222,7 +224,16 @@ export function NotificationsPage() {
   const { user } = useCurrentUser();
   const { data: notifications = [], isLoading, refetch, isFetching } = useNotifications();
   const { isMuted } = useMuteList();
+  const { setLastNotificationReadAt } = useMixstr();
   
+  // Mark notifications as read when the page is opened
+  useEffect(() => {
+    if (user) {
+      const now = Math.floor(Date.now() / 1000);
+      setLastNotificationReadAt(now);
+    }
+  }, [user, setLastNotificationReadAt]);
+
   // Filter out notifications from blocked users
   const filteredNotifications = notifications.filter((event) => !isMuted(event));
 

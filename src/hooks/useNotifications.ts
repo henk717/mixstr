@@ -2,6 +2,7 @@ import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useCurrentUser } from './useCurrentUser';
+import { useMixstr } from './useMixstr';
 
 export function useNotifications() {
   const { nostr } = useNostr();
@@ -33,5 +34,9 @@ export function useNotifications() {
 
 export function useUnreadNotificationCount() {
   const { data } = useNotifications();
-  return data?.length ?? 0;
+  const { lastNotificationReadAt } = useMixstr();
+  
+  // Filter notifications that are newer than last read timestamp
+  const unreadCount = data?.filter((n) => n.created_at > lastNotificationReadAt).length ?? 0;
+  return unreadCount;
 }

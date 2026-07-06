@@ -22,7 +22,7 @@ import { useRelayMonitor } from '@/hooks/useRelayMonitor';
 import { RelayMonitorDialog } from '@/components/RelayMonitorDialog';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useNotifications } from '@/hooks/useNotifications';
+import { useUnreadNotificationCount } from '@/hooks/useNotifications';
 import { LoginArea } from '@/components/auth/LoginArea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -93,7 +93,7 @@ export function LeftSidebar() {
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation();
   const { user, metadata } = useCurrentUser();
-  const { data: notifications } = useNotifications();
+  const unreadCount = useUnreadNotificationCount();
   const { sidebarLists, addSidebarList, updateSidebarList, removeSidebarList } = useMixstr();
   const { currentUser, otherUsers, isLoading: accountsLoading, setLogin, removeLogin } = useLoggedInAccounts();
   const [editDialog, setEditDialog] = useState<{ open: boolean; list?: SidebarList }>({ open: false });
@@ -101,7 +101,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [relayMonitorOpen, setRelayMonitorOpen] = useState(false);
   const { connectedCount, totalCount } = useRelayMonitor();
 
-  const notifCount = notifications?.length ?? 0;
   const npub = user ? nip19.npubEncode(user.pubkey) : null;
 
   const isActive = (to: string, exact?: boolean) => {
@@ -134,24 +133,24 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </Link>
 
       {/* Static nav */}
-      {STATIC_NAV.map((item) => (
-        <Link
-          key={item.to}
-          to={item.to}
-          onClick={onNavigate}
-          className={navItemClass(isActive(item.to, item.exact))}
-        >
-          <span className="relative flex-shrink-0 w-5 flex items-center justify-center">
-            {item.icon}
-            {item.notif && notifCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center bg-primary text-primary-foreground text-[9px] font-bold rounded-full px-0.5">
-                {notifCount > 99 ? '99+' : notifCount}
-              </span>
-            )}
-          </span>
-          {item.label}
-        </Link>
-      ))}
+{STATIC_NAV.map((item) => (
+         <Link
+           key={item.to}
+           to={item.to}
+           onClick={onNavigate}
+           className={navItemClass(isActive(item.to, item.exact))}
+         >
+           <span className="relative flex-shrink-0 w-5 flex items-center justify-center">
+             {item.icon}
+             {item.notif && unreadCount > 0 && (
+               <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 flex items-center justify-center bg-primary text-primary-foreground text-[9px] font-bold rounded-full px-0.5">
+                 {unreadCount > 99 ? '99+' : unreadCount}
+               </span>
+             )}
+           </span>
+           {item.label}
+         </Link>
+       ))}
 
       {/* Profile if logged in */}
       {user && npub && (

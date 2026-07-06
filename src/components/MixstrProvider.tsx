@@ -18,16 +18,18 @@ function MixstrSyncInner({
   sidebarLists,
   feedViewModes,
   spamSettings,
+  lastNotificationReadAt,
   onRemoteLoaded,
   onScheduleBackup,
 }: {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
   spamSettings: SpamSettings;
+  lastNotificationReadAt: number;
   onRemoteLoaded: (config: MixstrConfig) => void;
   onScheduleBackup: (fn: () => void) => void;
 }) {
-  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, spamSettings, onRemoteLoaded });
+  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, spamSettings, lastNotificationReadAt, onRemoteLoaded });
 
   // Expose scheduleBackup up to parent on each render
   useEffect(() => {
@@ -51,6 +53,7 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const [spamSettings, setSpamSettingsState] = useState<SpamSettings>(() =>
     loadSpamSettings(undefined),
   );
+  const [lastNotificationReadAt, setLastNotificationReadAt] = useState<number>(0);
   const [audioQueue, setAudioQueue] = useState<AudioTrack[]>([]);
   const [currentTrack, setCurrentTrack] = useState<AudioTrack | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -100,6 +103,11 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     setTimeout(() => scheduleBackupRef.current(), 0);
   }, []);
 
+  const setLastNotificationReadAtHandler = useCallback((timestamp: number) => {
+    setLastNotificationReadAt(timestamp);
+    setTimeout(() => scheduleBackupRef.current(), 0);
+  }, []);
+
   // Called when the remote Nostr config is fetched and newer than local
   const handleRemoteLoaded = useCallback((config: MixstrConfig) => {
     setSidebarListsState((local) => {
@@ -135,6 +143,13 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
         const merged = mergeSpamSettings(config.spamSettings);
         saveSpamSettings(merged, activePubkeyRef.current);
         return merged;
+      }
+      return local;
+    });
+    setLastNotificationReadAt((local) => {
+      const remoteTs = config.savedAt ?? 0;
+      if (remoteTs > 0 && config.lastNotificationReadAt && config.lastNotificationReadAt > local) {
+        return config.lastNotificationReadAt;
       }
       return local;
     });
@@ -238,37 +253,40 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <MixstrContext.Provider
-      value={{
-        feedViewModes,
-        setFeedViewMode,
-        sidebarLists,
-        setSidebarLists,
-        addSidebarList,
-        updateSidebarList,
-        removeSidebarList,
-        spamSettings,
-        setSpamSettings,
-        audioQueue,
-        currentTrack,
-        isPlaying,
-        addToQueue,
-        playTrack,
-        playNext,
-        playPrev,
-        togglePlay,
-        clearQueue,
-        audioProgress,
-        setAudioProgress,
-        audioDuration,
-        setAudioDuration,
-      }}
-    >
+<MixstrContext.Provider
+        value={{
+          feedViewModes,
+          setFeedViewMode,
+          sidebarLists,
+          setSidebarLists,
+          addSidebarList,
+          updateSidebarList,
+          removeSidebarList,
+          spamSettings,
+          setSpamSettings,
+          lastNotificationReadAt,
+          setLastNotificationReadAt: setLastNotificationReadAtHandler,
+          audioQueue,
+          currentTrack,
+          isPlaying,
+          addToQueue,
+          playTrack,
+          playNext,
+          playPrev,
+          togglePlay,
+          clearQueue,
+          audioProgress,
+          setAudioProgress,
+          audioDuration,
+          setAudioDuration,
+        }}
+      >
       {/* Sync component — rendered inside the provider so it can access Nostr hooks */}
       <MixstrSyncInner
         sidebarLists={sidebarLists}
         feedViewModes={feedViewModes}
         spamSettings={spamSettings}
+        lastNotificationReadAt={lastNotificationReadAt}
         onRemoteLoaded={handleRemoteLoaded}
         onScheduleBackup={(fn) => { scheduleBackupRef.current = fn; }}
       />

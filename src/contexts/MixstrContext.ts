@@ -29,6 +29,10 @@ export interface MixstrContextType {
   spamSettings: SpamSettings;
   setSpamSettings: (settings: SpamSettings) => void;
 
+  /** Last notification read timestamp (Unix seconds) */
+  lastNotificationReadAt: number;
+  setLastNotificationReadAt: (timestamp: number) => void;
+
   /** Audio player queue */
   audioQueue: AudioTrack[];
   currentTrack: AudioTrack | null;

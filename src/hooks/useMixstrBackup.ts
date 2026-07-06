@@ -28,6 +28,7 @@ export interface MixstrConfig {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
   spamSettings: SpamSettings;
+  lastNotificationReadAt: number;
   savedAt: number;
 }
 
@@ -99,11 +100,13 @@ export function useMixstrSync({
   sidebarLists,
   feedViewModes,
   spamSettings,
+  lastNotificationReadAt,
   onRemoteLoaded,
 }: {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
   spamSettings: SpamSettings;
+  lastNotificationReadAt: number;
   onRemoteLoaded: (config: MixstrConfig) => void;
 }) {
   const { user } = useCurrentUser();
@@ -138,6 +141,7 @@ export function useMixstrSync({
         sidebarLists,
         feedViewModes,
         spamSettings,
+        lastNotificationReadAt,
         savedAt: Math.floor(Date.now() / 1000),
       };
       try {
@@ -150,7 +154,7 @@ export function useMixstrSync({
         // Silent — backup is best-effort
       }
     }, 3000);
-  }, [user, sidebarLists, feedViewModes, spamSettings, save, queryClient]);
+  }, [user, sidebarLists, feedViewModes, spamSettings, lastNotificationReadAt, save, queryClient]);
 
   return {
     isSyncing: fetchStatus === 'pending' || isSaving,
