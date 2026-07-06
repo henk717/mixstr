@@ -139,6 +139,33 @@ function FollowingItem({ pubkey }: { pubkey: string }) {
   );
 }
 
+// ─── Passive backfill status indicator for profile feeds ──────────────────
+
+interface ProfileFeedStatusProps {
+  isLoading: boolean;
+  isFetchingOlder: boolean;
+  hasMore: boolean;
+  visibleCount: number;
+}
+
+function ProfileFeedStatus({ isLoading, isFetchingOlder, hasMore, visibleCount }: ProfileFeedStatusProps) {
+  if (isLoading || visibleCount === 0) return null;
+
+  if (hasMore || isFetchingOlder) {
+    return (
+      <div className="py-6 text-center text-sm text-muted-foreground">
+        Loading older posts…
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-6 text-center text-sm text-muted-foreground">
+      End of history
+    </div>
+  );
+}
+
 // ─── A lightweight "about" renderer that handles Nostr mentions + emojis ─────
 
 /**
@@ -194,13 +221,12 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
   useSeoMeta({ title: `${displayName} · Mixstr` });
 
   // Profile feed fetches all relevant event kinds from every read relay.
-  // The Posts tab filters out kind-1 replies below; this tab shows them.
+  // The Posts tab filters out kind-1 replies below; the Replies tab doesn't.
   const {
     events: postEvents,
     isLoading: postsLoading,
     isFetchingOlder: postsFetchingOlder,
     hasMore: postsHasMore,
-    fetchNextPage: postsFetchNext,
   } = useProfileFeed(pubkey);
 
   // Replies tab is rendered from the same full feed, just without filtering.
@@ -210,7 +236,6 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
   const repliesLoading = postsLoading;
   const repliesFetchingOlder = postsFetchingOlder;
   const repliesHasMore = postsHasMore;
-  const repliesFetchNext = postsFetchNext;
 
   // ── Build a synthetic kind-0 event for ProfileAbout ──────────────────────
   // We need a real NostrEvent to pass to NoteContent, but `about` isn't a
@@ -517,9 +542,12 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
             pages={postsOnlyPages}
             mode={mode}
             isLoading={postsLoading}
-            hasNextPage={postsHasMore}
-            isFetchingNextPage={postsFetchingOlder}
-            fetchNextPage={postsFetchNext}
+          />
+          <ProfileFeedStatus
+            isLoading={postsLoading}
+            isFetchingOlder={postsFetchingOlder}
+            hasMore={postsHasMore}
+            visibleCount={postsOnlyEvents.length}
           />
         </TabsContent>
 
@@ -528,9 +556,12 @@ export function ProfilePage({ pubkey }: ProfilePageProps) {
             pages={replyPages}
             mode={mode}
             isLoading={repliesLoading}
-            hasNextPage={repliesHasMore}
-            isFetchingNextPage={repliesFetchingOlder}
-            fetchNextPage={repliesFetchNext}
+          />
+          <ProfileFeedStatus
+            isLoading={repliesLoading}
+            isFetchingOlder={repliesFetchingOlder}
+            hasMore={repliesHasMore}
+            visibleCount={replyEvents.length}
           />
         </TabsContent>
 
