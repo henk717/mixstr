@@ -6,6 +6,24 @@ import { cn } from '@/lib/utils';
 import { useAppContext } from '@/hooks/useAppContext';
 import { SUGGESTED_RELAYS, DEFAULT_RELAYS } from '@/lib/appRelays';
 
+/** Minimal shape of the NIP-07 provider injected at `window.nostr`. */
+interface Nip07Provider {
+  getPublicKey(): Promise<string>;
+}
+
+/** Check for NIP-07 browser extension (same logic as LoginArea) */
+function getNip07Provider(): Nip07Provider | undefined {
+  if (typeof window === 'undefined' || !('nostr' in window)) return undefined;
+  const provider = (window as { nostr?: unknown }).nostr;
+  if (
+    provider &&
+    typeof (provider as Nip07Provider).getPublicKey === 'function'
+  ) {
+    return provider as Nip07Provider;
+  }
+  return undefined;
+}
+
 /**
  * Full-page prompt shown when no relays are configured yet.
  *
@@ -21,40 +39,33 @@ export function RelaySetupPrompt() {
   const [customInput, setCustomInput] = useState('');
   const [customRelays, setCustomRelays] = useState<string[]>([]);
   const [showRelaySelection, setShowRelaySelection] = useState(false);
-  const [extensionChecked, setExtensionChecked] = useState(false);
 
   // Automatically attempt NIP-07 extension authorization on mount
   useEffect(() => {
+    const provider = getNip07Provider();
+    
+    if (!provider) {
+      // No extension found, show relay selection
+      setShowRelaySelection(true);
+      return;
+    }
+
     const checkExtension = async () => {
-      if (typeof window === 'undefined' || !('nostr' in window)) {
-        setShowRelaySelection(true);
-        setExtensionChecked(true);
-        return;
-      }
-
       try {
-        const provider = (window as { nostr?: { getPublicKey: () => Promise<string> } }).nostr;
-        if (!provider?.getPublicKey) {
-          setShowRelaySelection(true);
-          setExtensionChecked(true);
-          return;
-        }
-
         // Attempt to get public key from extension
         const pubkey = await provider.getPublicKey();
+        
         if (pubkey) {
           // Extension granted access - NostrSync will import relays automatically
           // Keep this screen visible until NostrSync populates relays
-          setExtensionChecked(true);
           return;
         }
       } catch {
-        // Extension declined or errored
+        // Extension declined or errored — fall through to relay selection
       }
 
       // Fall back to relay selection
       setShowRelaySelection(true);
-      setExtensionChecked(true);
     };
 
     checkExtension();
