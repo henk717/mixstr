@@ -1,28 +1,28 @@
 import { useState } from 'react';
-import { Plus, X, Check, Wifi, Shield, ExternalLink } from 'lucide-react';
+import { Plus, X, Check, Wifi, Shield, Key } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useAppContext } from '@/hooks/useAppContext';
-import { SUGGESTED_RELAYS } from '@/lib/appRelays';
-import { LoginArea } from '@/components/auth/LoginArea';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { SUGGESTED_RELAYS, DEFAULT_RELAYS } from '@/lib/appRelays';
 
 /**
  * Full-page prompt shown when no relays are configured yet.
  *
- * The user must explicitly add at least one relay before any Nostr queries
- * are made. This prevents automatic relay connections without user consent.
+ * Flow:
+ * 1. Show extension auth prompt for NIP-07 browser extension
+ * 2. If not granted or missing extension, show relay selection page
+ * 3. Provide "Pick for me" button for default relay selection
  *
  * If the user logs in via NIP-07 extension, NostrSync will automatically
  * import their relay list and this screen dismisses itself.
  */
 export function RelaySetupPrompt() {
   const { updateConfig } = useAppContext();
-  const { user } = useCurrentUser();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [customInput, setCustomInput] = useState('');
   const [customRelays, setCustomRelays] = useState<string[]>([]);
+  const [showRelaySelection, setShowRelaySelection] = useState(false);
 
   const toggleSuggested = (url: string) => {
     setSelected((prev) => {
@@ -55,6 +55,40 @@ export function RelaySetupPrompt() {
     });
   };
 
+  /** Check for NIP-07 browser extension and attempt login */
+  const handleExtensionLogin = async () => {
+    if (typeof window === 'undefined' || !('nostr' in window)) {
+      setShowRelaySelection(true);
+      return;
+    }
+
+    try {
+      const provider = (window as { nostr?: { getPublicKey: () => Promise<string> } }).nostr;
+      if (!provider?.getPublicKey) {
+        setShowRelaySelection(true);
+        return;
+      }
+
+      const pubkey = await provider.getPublicKey();
+      if (pubkey) {
+        // Extension granted access - NostrSync will import relays automatically
+        return;
+      }
+    } catch {
+      // Extension declined or errored
+    }
+
+    // Fall back to relay selection
+    setShowRelaySelection(true);
+  };
+
+  /** Apply default relay selection */
+  const handlePickForMe = () => {
+    const defaultUrls = DEFAULT_RELAYS.map((r) => r.url);
+    setSelected(new Set(defaultUrls));
+    setCustomRelays(defaultUrls);
+  };
+
   const handleConnect = () => {
     if (selected.size === 0) return;
     const relays = [...selected].map((url) => ({ url, read: true, write: true }));
@@ -78,127 +112,182 @@ export function RelaySetupPrompt() {
           </span>
         </div>
 
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Choose your relays</h1>
-          <p className="text-muted-foreground text-sm mt-1.5 leading-relaxed">
-            Mixstr connects only to relays you choose. We never connect anywhere automatically —
-            you're in full control of your data flow.
-          </p>
-        </div>
+        {/* Extension Auth Prompt (shown first) */}
+        {!showRelaySelection && (
+          <div className="space-y-6">
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Authorize with Extension</h1>
+              <p className="text-muted-foreground text-sm mt-1.5 leading-relaxed">
+                Mixstr can use your browser's Nostr extension to automatically configure relays.
+              </p>
+            </div>
 
-        {/* Privacy note */}
-        <div className="flex items-start gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
-          <Shield size={16} className="text-primary flex-shrink-0 mt-0.5" />
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            <span className="text-foreground font-medium">No automatic connections.</span>{' '}
-            Relays you add here will be the only servers this client communicates with.
-            You can change them at any time in <strong>Settings → Relays</strong>.
-          </p>
-        </div>
+            <div className="flex items-start gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
+              <Key size={16} className="text-primary flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                <span className="text-foreground font-medium">Quick setup.</span>{' '}
+                If you have a Nostr extension (Alby, nos2x, etc.), clicking below will
+                automatically import your relay preferences.
+              </p>
+            </div>
 
-        {/* Login option */}
-        {!user && (
-          <div className="border border-border rounded-xl p-4 space-y-3">
-            <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Wifi size={15} className="text-primary" />
-              Log in to import your relay list
-            </p>
-            <p className="text-xs text-muted-foreground">
-              If you use a NIP-07 browser extension (Alby, nos2x, etc.), signing in will
-              automatically import your existing relay list — no manual selection needed.
-            </p>
-            <LoginArea className="max-w-64" />
+            <div className="space-y-3">
+              <Button
+                onClick={handleExtensionLogin}
+                className="w-full h-12 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Key size={16} className="mr-2" />
+                Authorize with Extension
+              </Button>
+
+              <p className="text-xs text-center text-muted-foreground">
+                Don't have an extension? It's not required.
+                <br />
+                Click below to choose relays manually instead.
+              </p>
+
+              <Button
+                onClick={() => setShowRelaySelection(true)}
+                variant="outline"
+                className="w-full h-10 text-sm"
+              >
+                Choose Relays Manually
+              </Button>
+            </div>
           </div>
         )}
 
-        {/* Suggested relays */}
-        <div className="space-y-2">
-          <p className="text-sm font-semibold text-foreground">Suggested public relays</p>
-          <p className="text-xs text-muted-foreground">
-            Select one or more. These are well-known community relays — you're not required to use any of them.
-          </p>
-          <div className="space-y-1.5">
-            {SUGGESTED_RELAYS.map(({ url, description }) => {
-              const isOn = selected.has(url);
-              return (
-                <button
-                  key={url}
-                  onClick={() => toggleSuggested(url)}
-                  className={cn(
-                    'w-full flex items-center justify-between gap-3 text-left px-3 py-2.5 rounded-xl border text-sm transition-all',
-                    isOn
-                      ? 'border-primary bg-primary/10 text-foreground'
-                      : 'border-border bg-card hover:bg-accent text-foreground',
-                  )}
-                >
-                  <div className="min-w-0">
-                    <p className="font-mono text-xs font-medium truncate">{url}</p>
-                    <p className="text-[11px] text-muted-foreground">{description}</p>
-                  </div>
-                  <div
-                    className={cn(
-                      'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors',
-                      isOn ? 'border-primary bg-primary' : 'border-border',
-                    )}
-                  >
-                    {isOn && <Check size={11} className="text-primary-foreground" strokeWidth={3} />}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Custom relay input */}
-        <div className="space-y-2">
-          <p className="text-sm font-semibold text-foreground">Add a custom relay</p>
-          <div className="flex gap-2">
-            <Input
-              value={customInput}
-              onChange={(e) => setCustomInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addCustom()}
-              placeholder="wss://relay.example.com"
-              className="font-mono text-sm h-9"
-            />
-            <Button size="sm" variant="outline" onClick={addCustom} className="h-9 flex-shrink-0">
-              <Plus size={15} />
-              Add
-            </Button>
-          </div>
-
-          {customRelays.length > 0 && (
-            <div className="space-y-1.5">
-              {customRelays.map((url) => (
-                <div
-                  key={url}
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/5 text-sm"
-                >
-                  <p className="font-mono text-xs flex-1 truncate text-foreground">{url}</p>
-                  <button
-                    onClick={() => removeCustom(url)}
-                    className="text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              ))}
+        {/* Relay Selection Page (shown after extension fails or is skipped) */}
+        {showRelaySelection && (
+          <div className="space-y-6">
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">Choose your relays</h1>
+              <p className="text-muted-foreground text-sm mt-1.5 leading-relaxed">
+                Mixstr is a viewer — we do not host any content. Please pick a few relays to load from,
+                or click the "Pick for me" button for a recommended selection.
+              </p>
             </div>
-          )}
-        </div>
 
-        {/* Connect button */}
-        <Button
-          onClick={handleConnect}
-          disabled={selected.size === 0}
-          className="w-full h-11 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
-        >
-          <Wifi size={16} className="mr-2" />
-          Connect to {selected.size > 0 ? `${selected.size} relay${selected.size > 1 ? 's' : ''}` : 'relays'}
-        </Button>
+            {/* Privacy note */}
+            <div className="flex items-start gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
+              <Shield size={16} className="text-primary flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                <span className="text-foreground font-medium">You're in control.</span>{' '}
+                Relays you select will be the only servers this client communicates with.
+                You can change them at any time in <strong>Settings → Relays</strong>.
+              </p>
+            </div>
 
-        <p className="text-xs text-center text-muted-foreground">
-          You can add, remove, or change relays at any time in Settings.
-        </p>
+            {/* Pick for me button */}
+            <div className="border border-border rounded-xl p-4 space-y-3">
+              <p className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Wifi size={15} className="text-primary" />
+                Not sure what to pick?
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Our recommended relay selection will give you access to the Nostr social network
+                with a balanced mix of performance and decentralization.
+              </p>
+              <Button
+                onClick={handlePickForMe}
+                variant="secondary"
+                className="w-full h-10 text-sm"
+              >
+                <Wifi size={14} className="mr-2" />
+                Pick for me
+              </Button>
+            </div>
+
+            {/* Suggested relays */}
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-foreground">Suggested public relays</p>
+              <p className="text-xs text-muted-foreground">
+                Select one or more. These are well-known community relays.
+              </p>
+              <div className="space-y-1.5">
+                {SUGGESTED_RELAYS.map(({ url, description }) => {
+                  const isOn = selected.has(url);
+                  return (
+                    <button
+                      key={url}
+                      onClick={() => toggleSuggested(url)}
+                      className={cn(
+                        'w-full flex items-center justify-between gap-3 text-left px-3 py-2.5 rounded-xl border text-sm transition-all',
+                        isOn
+                          ? 'border-primary bg-primary/10 text-foreground'
+                          : 'border-border bg-card hover:bg-accent text-foreground',
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs font-medium truncate">{url}</p>
+                        <p className="text-[11px] text-muted-foreground">{description}</p>
+                      </div>
+                      <div
+                        className={cn(
+                          'w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors',
+                          isOn ? 'border-primary bg-primary' : 'border-border',
+                        )}
+                      >
+                        {isOn && <Check size={11} className="text-primary-foreground" strokeWidth={3} />}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom relay input */}
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-foreground">Add a custom relay</p>
+              <div className="flex gap-2">
+                <Input
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addCustom()}
+                  placeholder="wss://relay.example.com"
+                  className="font-mono text-sm h-9"
+                />
+                <Button size="sm" variant="outline" onClick={addCustom} className="h-9 flex-shrink-0">
+                  <Plus size={15} />
+                  Add
+                </Button>
+              </div>
+
+              {customRelays.length > 0 && (
+                <div className="space-y-1.5">
+                  {customRelays.map((url) => (
+                    <div
+                      key={url}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/5 text-sm"
+                    >
+                      <p className="font-mono text-xs flex-1 truncate text-foreground">{url}</p>
+                      <button
+                        onClick={() => removeCustom(url)}
+                        className="text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Connect button */}
+            <Button
+              onClick={handleConnect}
+              disabled={selected.size === 0}
+              className="w-full h-11 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+            >
+              <Wifi size={16} className="mr-2" />
+              Connect to {selected.size > 0 ? `${selected.size} relay${selected.size > 1 ? 's' : ''}` : 'relays'}
+            </Button>
+
+            <p className="text-xs text-center text-muted-foreground">
+              You can add, remove, or change relays at any time in Settings.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
