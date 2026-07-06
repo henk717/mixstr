@@ -18,6 +18,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useEffect } from 'react';
+import { EmojifiedText } from '@/components/CustomEmoji';
 
 function kindIcon(kind: number) {
   switch (kind) {
@@ -97,9 +98,11 @@ function NotificationItem({
   const navigate = useNavigate();
   const author = useAuthor(event.pubkey);
   const meta = author.data?.metadata;
+  const authorEvent = author.data?.event;
   const npub = nip19.npubEncode(event.pubkey);
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || event.pubkey.slice(0, 10) + '…';
+  const avatarInitial = displayName[0]?.toUpperCase() || event.pubkey.slice(0, 1).toUpperCase();
 
   const showReplyContent = event.kind === 1 && event.content.trim().length > 0;
   const showReactionContent = event.kind === 7 && event.content !== '+' && event.content.trim().length > 0;
@@ -129,7 +132,7 @@ function NotificationItem({
           <Avatar className="w-10 h-10">
             <AvatarImage src={meta?.picture} />
             <AvatarFallback className="bg-primary/20 text-primary text-sm font-bold">
-              {displayName[0].toUpperCase()}
+              {avatarInitial}
             </AvatarFallback>
           </Avatar>
         </Link>
@@ -146,7 +149,9 @@ function NotificationItem({
             className="font-semibold text-sm hover:text-primary transition-colors"
             onClick={(e) => e.stopPropagation()}
           >
-            {displayName}
+            {authorEvent ? (
+              <EmojifiedText tags={authorEvent.tags}>{displayName}</EmojifiedText>
+            ) : displayName}
           </Link>
           <span className="text-sm text-muted-foreground">{kindLabel(event.kind)}</span>
           <span className="text-xs text-muted-foreground ml-auto flex-shrink-0">

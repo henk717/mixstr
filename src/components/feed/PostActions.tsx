@@ -7,6 +7,8 @@ import { useNostr } from '@nostrify/react';
 import { useToast } from '@/hooks/useToast';
 import { usePostReactions } from '@/hooks/usePostReactions';
 import { ReplyDialog } from './ReplyDialog';
+import { CustomEmojiImg } from '@/components/CustomEmoji';
+import { isCustomEmoji } from '@/lib/customEmoji';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -136,6 +138,7 @@ export function PostActions({ event, compact = false, enabled = true }: PostActi
 
   // Determine which emoji to show for the like button
   const likeEmoji = reactions.topEmoji === '👍' || reactions.count === 0 ? null : reactions.topEmoji;
+  const likeEmojiUrl = reactions.breakdown.get(likeEmoji ?? '')?.imageUrl;
 
   return (
     <>
@@ -183,18 +186,24 @@ export function PostActions({ event, compact = false, enabled = true }: PostActi
           title={reactions.hasReacted ? 'Reacted' : 'React'}
           aria-label={`React · ${reactions.count}`}
         >
-          <span className={cn(
-            'p-1.5 rounded-full transition-colors',
-            reactions.hasReacted
-              ? 'bg-pink-400/10'
-              : 'group-hover:bg-pink-400/10',
-          )}>
-            {likeEmoji ? (
-              <span className={compact ? 'text-sm' : 'text-base'} style={{ lineHeight: 1 }}>{likeEmoji}</span>
-            ) : (
-              <HeartIcon size={iconSize} filled={reactions.hasReacted} />
-            )}
-          </span>
+           <span className={cn(
+             'p-1.5 rounded-full transition-colors flex items-center justify-center',
+             reactions.hasReacted
+               ? 'bg-pink-400/10'
+               : 'group-hover:bg-pink-400/10',
+           )}>
+             {likeEmoji && likeEmojiUrl && isCustomEmoji(likeEmoji) ? (
+               <CustomEmojiImg
+                 name={likeEmoji.slice(1, -1)}
+                 url={likeEmojiUrl}
+                 className={compact ? 'h-4 w-4' : 'h-5 w-5'}
+               />
+             ) : likeEmoji ? (
+               <span className={compact ? 'text-sm' : 'text-base'} style={{ lineHeight: 1 }}>{likeEmoji}</span>
+             ) : (
+               <HeartIcon size={iconSize} filled={reactions.hasReacted} />
+             )}
+           </span>
           {!isLoading && reactions.count > 0 && (
             <span className="tabular-nums">
               {reactions.count >= 1000 ? `${Math.floor(reactions.count / 1000)}k` : reactions.count}

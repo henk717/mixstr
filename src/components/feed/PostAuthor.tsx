@@ -3,6 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthor } from '@/hooks/useAuthor';
 import { relativeTime } from '@/lib/postUtils';
 import { nip19 } from 'nostr-tools';
+import { EmojifiedText } from '@/components/CustomEmoji';
 
 interface PostAuthorProps {
   pubkey: string;
@@ -13,9 +14,11 @@ interface PostAuthorProps {
 export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
   const author = useAuthor(pubkey);
   const meta = author.data?.metadata;
+  const authorEvent = author.data?.event;
   const npub = nip19.npubEncode(pubkey);
   const rawName = meta?.display_name || meta?.name || '';
   const displayName = rawName.trim() || pubkey.slice(0, 10) + '…';
+  const avatarInitial = displayName[0]?.toUpperCase() || pubkey.slice(0, 1).toUpperCase();
 
   if (compact) {
     return (
@@ -24,7 +27,7 @@ export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
           <Avatar className="w-7 h-7 flex-shrink-0">
             <AvatarImage src={meta?.picture} />
             <AvatarFallback className="text-[10px] bg-primary/20 text-primary font-bold">
-              {displayName[0].toUpperCase()}
+              {avatarInitial}
             </AvatarFallback>
           </Avatar>
         </Link>
@@ -33,7 +36,9 @@ export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
           onClick={(e) => e.stopPropagation()}
           className="font-semibold text-sm truncate hover:text-primary transition-colors"
         >
-          {displayName}
+          {authorEvent ? (
+            <EmojifiedText tags={authorEvent.tags}>{displayName}</EmojifiedText>
+          ) : displayName}
         </Link>
         <span className="text-muted-foreground text-xs flex-shrink-0">
           · {relativeTime(createdAt)}
@@ -48,7 +53,7 @@ export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
         <Avatar className="w-10 h-10 flex-shrink-0">
           <AvatarImage src={meta?.picture} />
           <AvatarFallback className="text-sm bg-primary/20 text-primary font-bold">
-            {displayName[0].toUpperCase()}
+            {avatarInitial}
           </AvatarFallback>
         </Avatar>
       </Link>
@@ -58,7 +63,9 @@ export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
           onClick={(e) => e.stopPropagation()}
           className="font-semibold text-sm hover:text-primary transition-colors block truncate"
         >
-          {displayName}
+          {authorEvent ? (
+            <EmojifiedText tags={authorEvent.tags}>{displayName}</EmojifiedText>
+          ) : displayName}
         </Link>
         {meta?.nip05 && (
           <p className="text-xs text-muted-foreground truncate">{meta.nip05}</p>
