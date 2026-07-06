@@ -4,9 +4,14 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { useAppContext } from '@/hooks/useAppContext';
 
 const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 100;
 /**
- * How often (ms) to poll for newer events while the profile page is mounted.
+ * How often (ms) to actively crawl older history while the profile is mounted.
+ * This keeps filling the feed even when the user isn't scrolling.
+ */
+const OLDER_POLL_INTERVAL = 5_000;
+/**
+ * How often (ms) to poll for brand-new events.
  */
 const NEWER_POLL_INTERVAL = 12_000;
 
@@ -36,18 +41,21 @@ interface PerRelayResult {
  *
  * Strategy:
  *  - Each relay is paginated independently with its own `until` cursor so a
- *    slow or sparse relay never advances the global cursor past data that
- *    another relay still needs to return.
- *  - The feed keeps fetching older pages as long as any relay reports more
- *    events, eliminating the time gaps caused by the old global-page logic.
- *  - A background poll checks for brand-new posts and prepends them.
- *  - Events are de-duplicated by ID and sorted newest-first.
+ *    slow or sparse relay never holds up the others.
+ *  - Older fetches use the current oldest timestamp **inclusively** (rather
+ *    than `oldest - 1`) so events that share a timestamp are not skipped.
+ *  - We de-duplicate by event ID; a relay is considered exhausted only when a
+ *    request returns no new IDs. If a full page of duplicates comes back, we
+ *    probe one second below the current oldest cursor to make sure there isn't
+ *    a wall of older history behind them.
+ *  - A 5-second background crawl continually loads older history while the
+ *    component is mounted; the infinite-scroll sentinel also drives it.
+ *  - A 12-second poll prepends brand-new posts.
  */
 export function useProfileFeed(pubkey: string) {
   const { nostr } = useNostr();
   const { config } = useAppContext();
 
-  // Accumulated de-duplicated events, sorted newest-first
   const [events, setEvents] = useState<NostrEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetchingOlder, setIsFetchingOlder] = useState(false);
@@ -58,7 +66,6 @@ export function useProfileFeed(pubkey: string) {
   const fetchingNewerRef = useRef(false);
   const perRelayCursorRef = useRef<Map<string, RelayCursor>>(new Map());
 
-  /** Read-relay URLs from the user's NIP-65 list */
   const readRelays = config.relayMetadata.relays
     .filter((r) => r.read)
     .map((r) => r.url);
@@ -82,10 +89,18 @@ export function useProfileFeed(pubkey: string) {
     });
   }, []);
 
-  /** Update per-relay cursors from the events that relay just returned */
-  const updateRelayCursor = useCallback((url: string, batch: NostrEvent[]) => {
-    const cursor = perRelayCursorRef.current.get(url) ?? { hasMore: true };
+  const ensureCursor = useCallback((url: string) => {
+    let cursor = perRelayCursorRef.current.get(url);
+    if (!cursor) {
+      cursor = { hasMore: true };
+      perRelayCursorRef.current.set(url, cursor);
+    }
+    return cursor;
+  }, []);
 
+  /** Expand a relay's cursor from newly discovered events */
+  const expandCursor = useCallback((url: string, batch: NostrEvent[]) => {
+    const cursor = ensureCursor(url);
     for (const ev of batch) {
       if (cursor.oldest === undefined || ev.created_at < cursor.oldest) {
         cursor.oldest = ev.created_at;
@@ -94,13 +109,14 @@ export function useProfileFeed(pubkey: string) {
         cursor.newest = ev.created_at;
       }
     }
+    cursor.hasMore = true;
+  }, [ensureCursor]);
 
-    if (batch.length === 0) {
-      cursor.hasMore = false;
-    }
-
-    perRelayCursorRef.current.set(url, cursor);
-  }, []);
+  /** Mark a relay as exhausted */
+  const markRelayDone = useCallback((url: string) => {
+    const cursor = ensureCursor(url);
+    cursor.hasMore = false;
+  }, [ensureCursor]);
 
   /** Recompute global hasMore from per-relay state */
   const refreshHasMore = useCallback(() => {
@@ -119,6 +135,22 @@ export function useProfileFeed(pubkey: string) {
     setHasMore(anyHasMore);
   }, [readRelays]);
 
+  const querySingleRelay = useCallback(async (
+    url: string,
+    filter: FilterSpec,
+    timeoutMs: number,
+  ): Promise<NostrEvent[]> => {
+    if (!url) {
+      return nostr.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+    }
+    try {
+      const relay = nostr.relay(url);
+      return await relay.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+    } catch {
+      return [];
+    }
+  }, [nostr]);
+
   /**
    * Query each configured read relay individually. Returns each relay's
    * results separately so callers can update per-relay cursors.
@@ -130,7 +162,7 @@ export function useProfileFeed(pubkey: string) {
     if (readRelays.length === 0) {
       const cursor = perRelayCursorRef.current.get('');
       const filter = makeFilter('', cursor);
-      const batch = await nostr.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
+      const batch = await querySingleRelay('', filter, timeoutMs);
       return [{ url: '', events: batch }];
     }
 
@@ -138,20 +170,15 @@ export function useProfileFeed(pubkey: string) {
       readRelays.map(async (url) => {
         const cursor = perRelayCursorRef.current.get(url);
         const filter = makeFilter(url, cursor);
-        try {
-          const relay = nostr.relay(url);
-          const batch = await relay.query([filter], { signal: AbortSignal.timeout(timeoutMs) });
-          return { url, events: batch };
-        } catch {
-          return { url, events: [] };
-        }
+        const batch = await querySingleRelay(url, filter, timeoutMs);
+        return { url, events: batch };
       }),
     );
 
     return settled
       .filter((r): r is PromiseFulfilledResult<PerRelayResult> => r.status === 'fulfilled')
       .map((r) => r.value);
-  }, [nostr, readRelays]);
+  }, [readRelays, querySingleRelay]);
 
   /** Fetch the next older page from every relay that still has history */
   const fetchOlder = useCallback(async () => {
@@ -161,40 +188,67 @@ export function useProfileFeed(pubkey: string) {
 
     try {
       const results = await queryEachRelay(
-        (_url, cursor) => {
-          const until = cursor?.oldest !== undefined ? cursor.oldest - 1 : undefined;
-          return {
-            kinds: KINDS,
-            authors: [pubkey],
-            limit: PAGE_SIZE,
-            ...(until !== undefined && { until }),
-          };
-        },
+        (_url, cursor) => ({
+          kinds: KINDS,
+          authors: [pubkey],
+          limit: PAGE_SIZE,
+          ...(cursor?.oldest !== undefined && { until: cursor.oldest }),
+        }),
         10_000,
       );
 
-      let anyNew = false;
+      let anyProgress = false;
+
       for (const { url, events: batch } of results) {
-        updateRelayCursor(url, batch);
-        if (batch.length > 0) {
-          anyNew = true;
-          mergeEvents(batch);
+        const cursor = ensureCursor(url);
+        const newEvents = batch.filter((ev) => !seenIdsRef.current.has(ev.id));
+
+        if (newEvents.length > 0) {
+          mergeEvents(newEvents);
+          expandCursor(url, newEvents);
+          anyProgress = true;
+          continue;
+        }
+
+        // No new IDs in this batch.
+        if (batch.length < PAGE_SIZE || cursor.oldest === undefined || cursor.oldest <= 1) {
+          markRelayDone(url);
+          continue;
+        }
+
+        // The relay filled the page but every item was a duplicate. There may
+        // be a wall of older events behind them, so probe just below the
+        // current oldest timestamp.
+        const probeUntil = cursor.oldest - 1;
+        const probe = await querySingleRelay(url, {
+          kinds: KINDS,
+          authors: [pubkey],
+          limit: PAGE_SIZE,
+          until: probeUntil,
+        }, 10_000);
+
+        const probeNew = probe.filter((ev) => !seenIdsRef.current.has(ev.id));
+        if (probeNew.length > 0) {
+          mergeEvents(probeNew);
+          expandCursor(url, probeNew);
+          anyProgress = true;
+        } else {
+          markRelayDone(url);
         }
       }
 
       refreshHasMore();
 
-      // If every relay came back empty this round, there is genuinely no more.
-      if (!anyNew) {
+      if (!anyProgress) {
         setHasMore(false);
       }
     } catch {
-      // Network errors are swallowed; the next poll/scroll will retry.
+      // Network errors are swallowed; the next interval will retry.
     } finally {
       fetchingOlderRef.current = false;
       setIsFetchingOlder(false);
     }
-  }, [pubkey, hasMore, mergeEvents, queryEachRelay, refreshHasMore, updateRelayCursor]);
+  }, [pubkey, hasMore, mergeEvents, queryEachRelay, querySingleRelay, refreshHasMore, expandCursor, markRelayDone, ensureCursor]);
 
   /** Fetch events newer than the newest we have across all relays */
   const fetchNewer = useCallback(async () => {
@@ -217,19 +271,20 @@ export function useProfileFeed(pubkey: string) {
       );
 
       for (const { url, events: batch } of results) {
-        updateRelayCursor(url, batch);
-        if (batch.length > 0) mergeEvents(batch);
+        if (batch.length > 0) {
+          expandCursor(url, batch);
+          mergeEvents(batch);
+        }
       }
     } catch {
       // silently ignore
     } finally {
       fetchingNewerRef.current = false;
     }
-  }, [pubkey, mergeEvents, queryEachRelay, updateRelayCursor]);
+  }, [pubkey, mergeEvents, queryEachRelay, expandCursor]);
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
-    // Reset state whenever the pubkey changes
     setEvents([]);
     setIsLoading(true);
     setHasMore(true);
@@ -251,8 +306,13 @@ export function useProfileFeed(pubkey: string) {
         if (cancelled) return;
 
         for (const { url, events: batch } of results) {
-          updateRelayCursor(url, batch);
-          if (batch.length > 0) mergeEvents(batch);
+          if (batch.length > 0) {
+            expandCursor(url, batch);
+            mergeEvents(batch);
+          }
+          if (batch.length < PAGE_SIZE) {
+            markRelayDone(url);
+          }
         }
         refreshHasMore();
       } catch {
@@ -268,7 +328,15 @@ export function useProfileFeed(pubkey: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey]);
 
-  // ── Background poll for brand-new posts ──────────────────────────────────
+  // ── Active older-history crawl ─────────────────────────────────────────────
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (hasMore && !isLoading) void fetchOlder();
+    }, OLDER_POLL_INTERVAL);
+    return () => clearInterval(id);
+  }, [fetchOlder, hasMore, isLoading]);
+
+  // ── Background poll for brand-new posts ────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => { void fetchNewer(); }, NEWER_POLL_INTERVAL);
     return () => clearInterval(id);
