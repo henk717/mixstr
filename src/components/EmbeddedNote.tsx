@@ -4,6 +4,7 @@ import type { NostrEvent } from '@nostrify/nostrify';
 import { cn } from '@/lib/utils';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useEventById } from '@/hooks/useEventById';
+import { useIsVisible } from '@/hooks/useIsVisible';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { relativeTime, tryExtractEmbeddedEvent } from '@/lib/postUtils';
 
@@ -33,15 +34,6 @@ export function EmbeddedNote({ eventId, relays, authorHint, className, depth = 0
     ...(relays?.length ? { relays } : {}),
   });
 
-  const { data: event, isLoading } = useEventById({
-    eventId,
-    pubkey: authorHint,
-    relayHints: relays,
-    timeoutMs: 6000,
-    enabled: depth < MAX_DEPTH,
-    staleTime: 5 * 60 * 1000,
-  });
-
   // If we've hit max depth, just render a link
   if (depth >= MAX_DEPTH) {
     return (
@@ -58,34 +50,54 @@ export function EmbeddedNote({ eventId, relays, authorHint, className, depth = 0
     );
   }
 
+  // Use visibility tracking to defer fetching until the card is in view
+  const { ref: cardRef, isVisible: cardVisible } = useIsVisible<HTMLDivElement>({
+    rootMargin: '200px',
+  });
+
+  const { data: event, isLoading, isFetching, error } = useEventById({
+    eventId,
+    pubkey: authorHint,
+    relayHints: relays,
+    timeoutMs: 8000,
+    enabled: depth < MAX_DEPTH && cardVisible,
+    staleTime: 5 * 60 * 1000,
+  });
+
   return (
-    <Link
-      to={`/${neventId}`}
-      onClick={(e) => e.stopPropagation()}
-      className={cn(
-        'block border rounded-lg px-3 py-2.5 hover:bg-muted/30 transition-colors my-2',
-        className,
-      )}
-    >
-      {isLoading && (
-        <div className="animate-pulse space-y-1.5">
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-full bg-muted" />
-            <div className="h-3 w-24 bg-muted rounded" />
+    <div ref={cardRef}>
+      <Link
+        to={`/${neventId}`}
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          'block border rounded-lg px-3 py-2.5 hover:bg-muted/30 transition-colors my-2',
+          className,
+        )}
+      >
+        {(isLoading || (isFetching && !event)) && (
+          <div className="animate-pulse space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full bg-muted" />
+              <div className="h-3 w-24 bg-muted rounded" />
+            </div>
+            <div className="h-3 w-full bg-muted rounded" />
+            <div className="h-3 w-3/4 bg-muted rounded" />
           </div>
-          <div className="h-3 w-full bg-muted rounded" />
-          <div className="h-3 w-3/4 bg-muted rounded" />
-        </div>
-      )}
+        )}
 
-      {!isLoading && !event && (
-        <div className="text-xs text-muted-foreground font-mono truncate">
-          Note not found · {neventId.slice(0, 20)}…
-        </div>
-      )}
+        {!isLoading && !isFetching && !event && (
+          <div className="text-xs text-muted-foreground font-mono truncate">
+            {error ? (
+              <span>Failed to load · Click to view</span>
+            ) : (
+              <span>Note not found · {neventId.slice(0, 20)}…</span>
+            )}
+          </div>
+        )}
 
-      {event && <EmbeddedNoteBody event={event} depth={depth} />}
-    </Link>
+        {event && <EmbeddedNoteBody event={event} depth={depth} />}
+      </Link>
+    </div>
   );
 }
 

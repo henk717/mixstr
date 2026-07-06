@@ -66,5 +66,7 @@ export function useEventById(options: UseEventByIdOptions) {
     staleTime,
     refetchInterval,
     refetchOnWindowFocus,
+    retry: 2,
+    retryDelay: 500,
   });
 }
