@@ -9,6 +9,7 @@ import { ExplorePage } from "./pages/ExplorePage";
 import { MessagesPage } from "./pages/MessagesPage";
 import { ListFeedPage } from "./pages/ListFeedPage";
 import { CommunityPage } from "./pages/CommunityPage";
+import { HashtagFeedPage } from "./pages/HashtagFeedPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { MainLayout } from "./components/layout/MainLayout";
 
@@ -71,6 +72,16 @@ export function AppRouter() {
           element={
             <MainLayout>
               <CommunityPage />
+            </MainLayout>
+          }
+        />
+
+        {/* Hashtag feeds */}
+        <Route
+          path="/t/:tag"
+          element={
+            <MainLayout>
+              <HashtagFeedPage />
             </MainLayout>
           }
         />

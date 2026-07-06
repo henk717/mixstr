@@ -1,5 +1,6 @@
 import { stripMediaUrls } from '@/lib/postUtils';
 import { cn } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
 
 interface NoteContentProps {
   content: string;
@@ -8,6 +9,7 @@ interface NoteContentProps {
 }
 
 export function NoteContent({ content, maxLines }: NoteContentProps) {
+  const navigate = useNavigate();
   const text = stripMediaUrls(content);
 
   // Map maxLines → Tailwind line-clamp class
@@ -46,12 +48,16 @@ export function NoteContent({ content, maxLines }: NoteContentProps) {
           );
         }
         if (part.match(/^#\w+$/)) {
+          const hashtag = part.slice(1);
           return (
             <a
               key={i}
-              href={`/t/${part.slice(1)}`}
-              className="text-primary hover:underline"
-              onClick={(e) => e.stopPropagation()}
+              href={`/t/${hashtag}`}
+              className="text-primary hover:underline cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/t/${hashtag}`);
+              }}
             >
               {part}
             </a>
