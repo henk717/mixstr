@@ -30,14 +30,3 @@ export const SUGGESTED_RELAYS: { url: string; description: string }[] = [
   { url: 'wss://nostr.wine', description: 'nostr.wine — premium relay' },
   { url: 'wss://purplepag.es', description: 'purplepag.es — profile relay' },
 ];
-
-/**
- * Default relay selection used when user clicks "Pick for me".
- * This can be configured separately from suggested relays.
- * For now, it's identical to SUGGESTED_RELAYS, but can be customized.
- */
-export const DEFAULT_RELAYS: { url: string; description: string }[] = [
-  { url: 'wss://relay.ditto.pub', description: 'Ditto — general purpose' },
-  { url: 'wss://relay.primal.net', description: 'Primal — high-speed cache' },
-  { url: 'wss://relay.damus.io', description: 'Damus — popular iOS client relay' },
-];
