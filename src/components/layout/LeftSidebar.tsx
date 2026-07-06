@@ -36,13 +36,14 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { useMixstr } from '@/hooks/useMixstr';
-import { useLoggedInAccounts } from '@/hooks/useLoggedInAccounts';
+import { useLoggedInAccounts, type Account } from '@/hooks/useLoggedInAccounts';
 import { ListIcon } from './ListIcon';
 import { EditListDialog } from './EditListDialog';
 import AuthDialog from '@/components/auth/AuthDialog';
 import type { SidebarList } from '@/lib/sidebarLists';
 import { createListId, listTimestamp } from '@/lib/sidebarLists';
 import { nip19 } from 'nostr-tools';
+import { EmojifiedText } from '@/components/CustomEmoji';
 
 // The static navigation items always present at the top
 const STATIC_NAV = [
@@ -259,23 +260,27 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                     )}
                   </AvatarFallback>
                 </Avatar>
-                <div className="min-w-0 flex-1">
-                  {accountsLoading && !metadata?.name ? (
-                    <div className="space-y-1">
-                      <Skeleton className="h-3 w-24" />
-                      <Skeleton className="h-3 w-16" />
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-sm font-semibold truncate text-foreground leading-tight">
-                        {metadata?.display_name ?? metadata?.name ?? 'Anon'}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate leading-tight">
-                        {metadata?.nip05 ?? user.pubkey.slice(0, 12) + '…'}
-                      </p>
-                    </>
-                  )}
-                </div>
+                 <div className="min-w-0 flex-1">
+                   {accountsLoading && !metadata?.name ? (
+                     <div className="space-y-1">
+                       <Skeleton className="h-3 w-24" />
+                       <Skeleton className="h-3 w-16" />
+                     </div>
+                   ) : (
+                     <>
+                       <p className="text-sm font-semibold truncate text-foreground leading-tight">
+                         {currentUser.event ? (
+                           <EmojifiedText tags={currentUser.event.tags}>{metadata?.display_name ?? metadata?.name ?? 'Anon'}</EmojifiedText>
+                         ) : (
+                           metadata?.display_name ?? metadata?.name ?? 'Anon'
+                         )}
+                       </p>
+                       <p className="text-xs text-muted-foreground truncate leading-tight">
+                         {metadata?.nip05 ?? user.pubkey.slice(0, 12) + '…'}
+                       </p>
+                     </>
+                   )}
+                 </div>
                 <ChevronDown size={14} className="text-muted-foreground flex-shrink-0 group-hover:text-foreground transition-colors" />
               </button>
             </DropdownMenuTrigger>
@@ -285,25 +290,29 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               align="start"
               className="w-64 bg-popover border-border mb-1"
             >
-              {/* Current account header */}
-              <DropdownMenuLabel className="px-3 py-2 font-normal">
-                <div className="flex items-center gap-2.5">
-                  <Avatar className="w-9 h-9 flex-shrink-0">
-                    <AvatarImage src={metadata?.picture} />
-                    <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">
-                      {(metadata?.display_name ?? metadata?.name ?? 'U')[0].toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate text-foreground">
-                      {metadata?.display_name ?? metadata?.name ?? 'Anon'}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {metadata?.nip05 ?? user.pubkey.slice(0, 10) + '…'}
-                    </p>
-                  </div>
-                </div>
-              </DropdownMenuLabel>
+               {/* Current account header */}
+               <DropdownMenuLabel className="px-3 py-2 font-normal">
+                 <div className="flex items-center gap-2.5">
+                   <Avatar className="w-9 h-9 flex-shrink-0">
+                     <AvatarImage src={metadata?.picture} />
+                     <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">
+                       {(metadata?.display_name ?? metadata?.name ?? 'U')[0].toUpperCase()}
+                     </AvatarFallback>
+                   </Avatar>
+                   <div className="min-w-0">
+                     <p className="text-sm font-semibold truncate text-foreground">
+                       {currentUser.event ? (
+                         <EmojifiedText tags={currentUser.event.tags}>{metadata?.display_name ?? metadata?.name ?? 'Anon'}</EmojifiedText>
+                       ) : (
+                         metadata?.display_name ?? metadata?.name ?? 'Anon'
+                       )}
+                     </p>
+                     <p className="text-xs text-muted-foreground truncate">
+                       {metadata?.nip05 ?? user.pubkey.slice(0, 10) + '…'}
+                     </p>
+                   </div>
+                 </div>
+               </DropdownMenuLabel>
 
               <DropdownMenuSeparator />
 
@@ -313,28 +322,35 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                   <DropdownMenuLabel className="text-[10px] text-muted-foreground px-3 py-1 font-normal uppercase tracking-wide">
                     Switch account
                   </DropdownMenuLabel>
-                  {otherUsers.map((acct) => (
-                    <DropdownMenuItem
-                      key={acct.id}
-                      onClick={() => { setLogin(acct.id); onNavigate?.(); }}
-                      className="flex items-center gap-2.5 px-3 py-2 cursor-pointer"
-                    >
-                      <Avatar className="w-7 h-7 flex-shrink-0">
-                        <AvatarImage src={acct.metadata.picture} />
-                        <AvatarFallback className="bg-primary/20 text-primary text-[10px] font-bold">
-                          {(acct.metadata.display_name ?? acct.metadata.name ?? 'U')[0].toUpperCase()}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm truncate">
-                          {acct.metadata.display_name ?? acct.metadata.name ?? 'Anon'}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {acct.metadata.nip05 ?? acct.pubkey.slice(0, 10) + '…'}
-                        </p>
-                      </div>
-                    </DropdownMenuItem>
-                  ))}
+                   {otherUsers.map((acct) => {
+                     const acctName = acct.metadata.display_name ?? acct.metadata.name ?? 'Anon';
+                     return (
+                       <DropdownMenuItem
+                         key={acct.id}
+                         onClick={() => { setLogin(acct.id); onNavigate?.(); }}
+                         className="flex items-center gap-2.5 px-3 py-2 cursor-pointer"
+                       >
+                         <Avatar className="w-7 h-7 flex-shrink-0">
+                           <AvatarImage src={acct.metadata.picture} />
+                           <AvatarFallback className="bg-primary/20 text-primary text-[10px] font-bold">
+                             {acctName[0].toUpperCase()}
+                           </AvatarFallback>
+                         </Avatar>
+                         <div className="min-w-0 flex-1">
+                           <p className="text-sm truncate">
+                             {acct.event ? (
+                               <EmojifiedText tags={acct.event.tags}>{acctName}</EmojifiedText>
+                             ) : (
+                               acctName
+                             )}
+                           </p>
+                           <p className="text-xs text-muted-foreground truncate">
+                             {acct.metadata.nip05 ?? acct.pubkey.slice(0, 10) + '…'}
+                           </p>
+                         </div>
+                       </DropdownMenuItem>
+                     );
+                   })}
                   <DropdownMenuSeparator />
                 </>
               )}
