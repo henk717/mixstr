@@ -2,6 +2,7 @@ import { useSeoMeta } from '@unhead/react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useMuteList } from '@/hooks/useMuteList';
 import { useNostr } from '@nostrify/react';
 import { useQueries } from '@tanstack/react-query';
 import { LoginArea } from '@/components/auth/LoginArea';
@@ -220,6 +221,10 @@ export function NotificationsPage() {
   useSeoMeta({ title: 'Notifications · Mixstr' });
   const { user } = useCurrentUser();
   const { data: notifications = [], isLoading, refetch, isFetching } = useNotifications();
+  const { isMuted } = useMuteList();
+  
+  // Filter out notifications from blocked users
+  const filteredNotifications = notifications.filter((event) => !isMuted(event));
 
   if (!user) {
     return (
@@ -264,20 +269,20 @@ export function NotificationsPage() {
         </div>
       )}
 
-      {!isLoading && notifications.length === 0 && (
-        <Card className="border-dashed mx-4 my-8">
-          <CardContent className="py-12 px-8 text-center">
-            <Bell size={32} className="text-muted-foreground mx-auto mb-3" />
-            <p className="text-muted-foreground text-sm">
-              No notifications yet. When people react, reply, or zap your posts, they'll appear here.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+       {!isLoading && filteredNotifications.length === 0 && (
+         <Card className="border-dashed mx-4 my-8">
+           <CardContent className="py-12 px-8 text-center">
+             <Bell size={32} className="text-muted-foreground mx-auto mb-3" />
+             <p className="text-muted-foreground text-sm">
+               No notifications yet. When people react, reply, or zap your posts, they'll appear here.
+             </p>
+           </CardContent>
+         </Card>
+       )}
 
-      {!isLoading && notifications.length > 0 && (
-        <NotificationsWithContext notifications={notifications} />
-      )}
+       {!isLoading && filteredNotifications.length > 0 && (
+         <NotificationsWithContext notifications={filteredNotifications} />
+       )}
     </div>
   );
 }

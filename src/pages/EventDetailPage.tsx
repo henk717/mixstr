@@ -16,6 +16,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useEventById } from '@/hooks/useEventById';
 import { useParentEvent } from '@/hooks/useParentEvent';
+import { useMuteList } from '@/hooks/useMuteList';
 import {
   getEventTitle,
   getCoverImage,
@@ -191,6 +192,7 @@ function WrapperBanner({ wrapper }: { wrapper: NostrEvent }) {
 
 function AllReplies({ eventId }: { eventId: string }) {
   const { nostr } = useNostr();
+  const { isMuted } = useMuteList();
 
   const { data: replies = [], isLoading } = useQuery<NostrEvent[]>({
     queryKey: ['nostr', 'all-replies', eventId],
@@ -199,7 +201,9 @@ function AllReplies({ eventId }: { eventId: string }) {
         [{ kinds: [1], '#e': [eventId], limit: 100 }],
         { signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]) },
       );
-      return events.sort((a, b) => a.created_at - b.created_at);
+      // Filter out replies from blocked users
+      const filtered = events.filter((event) => !isMuted(event));
+      return filtered.sort((a, b) => a.created_at - b.created_at);
     },
     staleTime: 60 * 1000,
   });
