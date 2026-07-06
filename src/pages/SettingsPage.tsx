@@ -12,6 +12,7 @@ import { useMixstr } from '@/hooks/useMixstr';
 import { useMuteList } from '@/hooks/useMuteList';
 import { EditProfileForm } from '@/components/EditProfileForm';
 import { LoginArea } from '@/components/auth/LoginArea';
+import { MixstrRawEditDialog } from '@/components/MixstrRawEditDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -823,6 +824,7 @@ export function SettingsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [isResyncing, setIsResyncing] = useState(false);
+  const [rawEditOpen, setRawEditOpen] = useState(false);
 
   useSeoMeta({ title: 'Settings · Mixstr' });
 
@@ -884,18 +886,34 @@ export function SettingsPage() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="profile">
-            {user ? (
-              <EditProfileForm />
-            ) : (
-              <Card className="border-dashed">
-                <CardContent className="py-10 text-center">
-                  <p className="text-muted-foreground text-sm mb-4">Sign in to edit your profile.</p>
-                  <LoginArea className="max-w-xs mx-auto" />
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
+           <TabsContent value="profile">
+             {user ? (
+               <div className="space-y-6">
+                 <EditProfileForm />
+                 
+                 {/* Mixstr Raw Edit Debug Button */}
+                 <div className="pt-6 border-t border-border">
+                   <Button
+                     variant="outline"
+                     onClick={() => setRawEditOpen(true)}
+                     className="w-full border-red-500 text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950 text-sm h-9"
+                   >
+                     Mixstr Raw Edit
+                   </Button>
+                   <p className="text-[10px] text-muted-foreground mt-2 text-center">
+                     View, edit, or delete your NIP-78 encrypted backup (kind 30078)
+                   </p>
+                 </div>
+               </div>
+             ) : (
+               <Card className="border-dashed">
+                 <CardContent className="py-10 text-center">
+                   <p className="text-muted-foreground text-sm mb-4">Sign in to edit your profile.</p>
+                   <LoginArea className="max-w-xs mx-auto" />
+                 </CardContent>
+               </Card>
+             )}
+           </TabsContent>
 
           <TabsContent value="relays">
             <RelaySettings />
@@ -904,8 +922,11 @@ export function SettingsPage() {
           <TabsContent value="blocks">
             <BlockSettings />
           </TabsContent>
-        </Tabs>
-      </div>
-    </div>
-  );
-}
+         </Tabs>
+       </div>
+
+       {/* Mixstr Raw Edit Dialog */}
+       <MixstrRawEditDialog open={rawEditOpen} onOpenChange={setRawEditOpen} />
+     </div>
+   );
+ }
