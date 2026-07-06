@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -11,9 +11,11 @@ const PAGE_SIZE = 100;
  */
 const OLDER_POLL_INTERVAL = 5_000;
 /**
- * How often (ms) to poll for brand-new events.
+ * Fallback poll interval for new events. Live subscriptions deliver new events
+ * instantly; this poll catches anything the subscription might miss (e.g. after
+ * reconnects).
  */
-const NEWER_POLL_INTERVAL = 12_000;
+const NEWER_POLL_INTERVAL = 3_000;
 
 interface RelayCursor {
   oldest?: number;
@@ -34,12 +36,20 @@ interface PerRelayResult {
   events: NostrEvent[];
 }
 
+type RelayMsg =
+  | readonly ['EVENT', string, NostrEvent]
+  | readonly ['EOSE', string]
+  | readonly ['CLOSED', string, string]
+  | readonly ['NOTICE', string];
+
 /**
  * useProfileFeed
  *
  * Fetches a profile's full event history from every configured read relay.
  *
  * Strategy:
+ *  - A live subscription is opened on each read relay so new events arrive
+ *    immediately without waiting for a poll cycle.
  *  - Each relay is paginated independently with its own `until` cursor so a
  *    slow or sparse relay never holds up the others.
  *  - Older fetches use the current oldest timestamp **inclusively** (rather
@@ -48,9 +58,8 @@ interface PerRelayResult {
  *    request returns no new IDs. If a full page of duplicates comes back, we
  *    probe one second below the current oldest cursor to make sure there isn't
  *    a wall of older history behind them.
- *  - A 5-second background crawl continually loads older history while the
- *    component is mounted; the infinite-scroll sentinel also drives it.
- *  - A 12-second poll prepends brand-new posts.
+ *  - A 5-second background crawl fills older history automatically.
+ *  - A 3-second fallback poll catches edge cases like reconnects.
  */
 export function useProfileFeed(pubkey: string) {
   const { nostr } = useNostr();
@@ -66,9 +75,10 @@ export function useProfileFeed(pubkey: string) {
   const fetchingNewerRef = useRef(false);
   const perRelayCursorRef = useRef<Map<string, RelayCursor>>(new Map());
 
-  const readRelays = config.relayMetadata.relays
-    .filter((r) => r.read)
-    .map((r) => r.url);
+  const readRelays = useMemo(
+    () => config.relayMetadata.relays.filter((r) => r.read).map((r) => r.url),
+    [config.relayMetadata.relays],
+  );
 
   /** Merge new events into state, de-duplicated and sorted */
   const mergeEvents = useCallback((incoming: NostrEvent[]) => {
@@ -328,6 +338,48 @@ export function useProfileFeed(pubkey: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pubkey]);
 
+  // ── Live subscription for brand-new events ─────────────────────────────────
+  useEffect(() => {
+    const since = Math.floor(Date.now() / 1000) - 60;
+    const filters: FilterSpec[] = [{ kinds: KINDS, authors: [pubkey], since }];
+    const controllers: AbortController[] = [];
+
+    const handleMsg = (url: string, msg: RelayMsg) => {
+      if (msg[0] === 'EVENT') {
+        const ev = msg[2];
+        expandCursor(url, [ev]);
+        mergeEvents([ev]);
+      }
+    };
+
+    const startRelay = async (url: string, relayFilters: FilterSpec[]) => {
+      const ac = new AbortController();
+      controllers.push(ac);
+      try {
+        const relay = url ? nostr.relay(url) : nostr;
+        for await (const msg of relay.req(relayFilters, { signal: ac.signal })) {
+          handleMsg(url, msg as RelayMsg);
+        }
+      } catch {
+        // Subscription closed or errored; reconnect handled by Nostrify.
+      }
+    };
+
+    if (readRelays.length === 0) {
+      void startRelay('', filters);
+    } else {
+      for (const url of readRelays) {
+        void startRelay(url, filters);
+      }
+    }
+
+    return () => {
+      for (const ac of controllers) {
+        ac.abort();
+      }
+    };
+  }, [pubkey, nostr, readRelays, mergeEvents, expandCursor]);
+
   // ── Active older-history crawl ─────────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => {
@@ -336,7 +388,7 @@ export function useProfileFeed(pubkey: string) {
     return () => clearInterval(id);
   }, [fetchOlder, hasMore, isLoading]);
 
-  // ── Background poll for brand-new posts ────────────────────────────────────
+  // ── Fallback poll for newer events ───────────────────────────────────────────
   useEffect(() => {
     const id = setInterval(() => { void fetchNewer(); }, NEWER_POLL_INTERVAL);
     return () => clearInterval(id);
