@@ -6,11 +6,6 @@ import { useAppContext } from '@/hooks/useAppContext';
 const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
 const PAGE_SIZE = 100;
 /**
- * How often (ms) to actively crawl older history while the profile is mounted.
- * This keeps filling the feed even when the user isn't scrolling.
- */
-const OLDER_POLL_INTERVAL = 5_000;
-/**
  * Fallback poll interval for new events. Live subscriptions deliver new events
  * instantly; this poll catches anything the subscription might miss (e.g. after
  * reconnects).
@@ -380,12 +375,25 @@ export function useProfileFeed(pubkey: string) {
     };
   }, [pubkey, nostr, readRelays, mergeEvents, expandCursor]);
 
-  // ── Active older-history crawl ─────────────────────────────────────────────
+  // ── Active older-history crawl (fetch back-to-back) ──────────────────────
   useEffect(() => {
-    const id = setInterval(() => {
-      if (hasMore && !isLoading) void fetchOlder();
-    }, OLDER_POLL_INTERVAL);
-    return () => clearInterval(id);
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = () => {
+      timeoutId = setTimeout(async () => {
+        if (cancelled || !hasMore || isLoading) return;
+        await fetchOlder();
+        schedule();
+      }, 0);
+    };
+
+    schedule();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    };
   }, [fetchOlder, hasMore, isLoading]);
 
   // ── Fallback poll for newer events ───────────────────────────────────────────
