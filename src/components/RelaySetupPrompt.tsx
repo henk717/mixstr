@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Check, Wifi, Shield } from 'lucide-react';
+import { Plus, X, Check, Wifi, Shield, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -28,48 +28,57 @@ function getNip07Provider(): Nip07Provider | undefined {
  * Full-page prompt shown when no relays are configured yet.
  *
  * Flow:
- * 1. Automatically attempt NIP-07 extension authorization on mount
- * 2. If granted, NostrSync imports relays and this screen dismisses
- * 3. If not granted or missing extension, show relay selection page
- * 4. Provide "Pick for me" button for default relay selection
+ * 1. Show loading splash for 1 second to allow extension to register
+ * 2. Automatically attempt NIP-07 extension authorization
+ * 3. If granted, NostrSync imports relays and this screen dismisses
+ * 4. If not granted or missing extension, show relay selection page
+ * 5. Provide "Pick for me" button for default relay selection
  */
 export function RelaySetupPrompt() {
   const { updateConfig } = useAppContext();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [customInput, setCustomInput] = useState('');
   const [customRelays, setCustomRelays] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showRelaySelection, setShowRelaySelection] = useState(false);
 
-  // Automatically attempt NIP-07 extension authorization on mount
+  // Automatically attempt NIP-07 extension authorization after 1 second delay
   useEffect(() => {
-    const provider = getNip07Provider();
-    
-    if (!provider) {
-      // No extension found, show relay selection
-      setShowRelaySelection(true);
-      return;
-    }
-
-    const checkExtension = async () => {
-      try {
-        // Attempt to get public key from extension
-        const pubkey = await provider.getPublicKey();
-        
-        if (pubkey) {
-          // Extension granted access - NostrSync will import relays automatically
-          // Keep this screen visible until NostrSync populates relays
-          return;
-        }
-      } catch {
-        // Extension declined or errored — fall through to relay selection
+    const timer = setTimeout(() => {
+      const provider = getNip07Provider();
+      
+      if (!provider) {
+        // No extension found, show relay selection
+        setShowRelaySelection(true);
+        setIsLoading(false);
+        return;
       }
 
-      // Fall back to relay selection
-      setShowRelaySelection(true);
-    };
+      const checkExtension = async () => {
+        try {
+          // Attempt to get public key from extension
+          const pubkey = await provider.getPublicKey();
+          
+          if (pubkey) {
+            // Extension granted access - NostrSync will import relays automatically
+            // Keep this screen visible until NostrSync populates relays
+            setIsLoading(false);
+            return;
+          }
+        } catch {
+          // Extension declined or errored — fall through to relay selection
+        }
 
-    checkExtension();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // Fall back to relay selection
+        setShowRelaySelection(true);
+        setIsLoading(false);
+      };
+
+      checkExtension();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, 1000);
+
+    return () => clearTimeout(timer);
   }, []);
 
   const toggleSuggested = (url: string) => {
@@ -133,8 +142,17 @@ export function RelaySetupPrompt() {
           </span>
         </div>
 
+        {/* Loading Splash */}
+        {isLoading && (
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <Loader2 className="w-12 h-12 text-primary animate-spin" />
+            <p className="text-sm text-muted-foreground">Checking for Nostr extension...</p>
+          </div>
+        )}
+
         {/* Relay Selection Page */}
-        <div className="space-y-6">
+        {!isLoading && (
+          <div className="space-y-6">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Choose your relays</h1>
             <p className="text-muted-foreground text-sm mt-1.5 leading-relaxed">
@@ -262,6 +280,7 @@ export function RelaySetupPrompt() {
             You can add, remove, or change relays at any time in Settings.
           </p>
         </div>
+        )}
       </div>
     </div>
   );
