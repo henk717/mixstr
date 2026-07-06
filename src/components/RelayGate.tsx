@@ -1,5 +1,4 @@
 import { type ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useNostrLogin } from '@nostrify/react/login';
 import { RelaySetupPrompt } from './RelaySetupPrompt';
@@ -17,33 +16,20 @@ import { RelaySetupPrompt } from './RelaySetupPrompt';
  * we don't want to make any relay connections without explicit user consent.
  */
 export function RelayGate({ children }: { children: ReactNode }) {
-  const { config, isSyncingRelays } = useAppContext();
+  const { config } = useAppContext();
   const { logins } = useNostrLogin();
 
   const hasRelays = config.relayMetadata.relays.length > 0;
   const hasLogin = logins.length > 0;
 
   // If there's a login but no relays yet, NostrSync is trying to pull the
-  // NIP-65 list. Show a loading overlay while syncing.
+  // NIP-65 list. Show a thin loading indicator rather than the full setup
+  // prompt — it should resolve quickly.
   if (!hasRelays && hasLogin) {
     return (
       <>
         {children}
-        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="bg-popover border border-border rounded-2xl p-6 shadow-xl max-w-sm w-full mx-4 text-center space-y-4">
-            <div className="flex justify-center">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            </div>
-            <div>
-              <h3 className="text-lg font-semibold text-foreground">Syncing relays</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                {isSyncingRelays 
-                  ? 'Fetching your relay list from Nostr…' 
-                  : 'Setting up your connections…'}
-              </p>
-            </div>
-          </div>
-        </div>
+        {/* NostrSync will populate relays; nothing to block here */}
       </>
     );
   }
