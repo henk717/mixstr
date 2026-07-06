@@ -30,6 +30,7 @@ import { useTopComments } from '@/hooks/useEventComments';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useParentEvent } from '@/hooks/useParentEvent';
 import { useResolvedEvent } from '@/hooks/useResolvedEvent';
+import { useIsVisible } from '@/hooks/useIsVisible';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -61,6 +62,8 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const [textExpanded, setTextExpanded] = useState(false);
   const [coverLightboxOpen, setCoverLightboxOpen] = useState(false);
   const navigate = useNavigate();
+  const { ref: actionsRef, isVisible: actionsVisible } = useIsVisible<HTMLDivElement>();
+  const { ref: commentsRef, isVisible: commentsVisible } = useIsVisible<HTMLDivElement>();
 
   // Resolve repost/community-approval wrappers to the original event.
   const { event: displayEvent, wrapper } = useResolvedEvent(event);
@@ -230,6 +233,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
                   <video
                     src={videos[0]}
                     controls
+                    preload="none"
                     className="w-full max-h-96 object-contain bg-black"
                   />
                 </div>
@@ -240,10 +244,22 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
         </div>
 
         {/* Top 3 comments preview */}
-        <CommentPreview eventId={displayEvent.id} nevent={nevent} />
+        <div ref={commentsRef}>
+          <CommentPreview eventId={displayEvent.id} nevent={nevent} enabled={commentsVisible} />
+        </div>
 
-        <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-          {isRss ? <RssOpenRow event={displayEvent} /> : <PostActions event={displayEvent} />}
+        <div
+          ref={actionsRef}
+          className="mt-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {isRss ? (
+            <RssOpenRow event={displayEvent} />
+          ) : actionsVisible ? (
+            <PostActions event={displayEvent} enabled={actionsVisible} />
+          ) : (
+            <div className="h-6" aria-hidden="true" />
+          )}
         </div>
 
         {moderation && (
@@ -263,9 +279,9 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   );
 }
 
-function CommentPreview({ eventId, nevent }: { eventId: string; nevent: string }) {
+function CommentPreview({ eventId, nevent, enabled = true }: { eventId: string; nevent: string; enabled?: boolean }) {
   const navigate = useNavigate();
-  const { data: comments = [], isLoading } = useTopComments(eventId, 3, true);
+  const { data: comments = [], isLoading } = useTopComments(eventId, 3, enabled);
 
   if (isLoading) {
     return (

@@ -14,9 +14,11 @@ interface PostActionsProps {
   /** The full event, needed to build proper reply/react tags */
   event: NostrEvent;
   compact?: boolean;
+  /** If false, reaction/reply/repost counts won't be fetched. */
+  enabled?: boolean;
 }
 
-export function PostActions({ event, compact = false }: PostActionsProps) {
+export function PostActions({ event, compact = false, enabled = true }: PostActionsProps) {
   const { user } = useCurrentUser();
   const { mutateAsync: publish } = useNostrPublish();
   const { nostr } = useNostr();
@@ -29,6 +31,7 @@ export function PostActions({ event, compact = false }: PostActionsProps) {
   const { replies, reposts, reactions, isLoading } = usePostReactions(
     event.id,
     user?.pubkey,
+    enabled,
   );
 
   const btnCls = cn(

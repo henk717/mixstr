@@ -28,6 +28,7 @@ import {
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useParentEvent } from '@/hooks/useParentEvent';
 import { useResolvedEvent } from '@/hooks/useResolvedEvent';
+import { useIsVisible } from '@/hooks/useIsVisible';
 
 interface ShortPostCardProps {
   event: NostrEvent;
@@ -39,6 +40,7 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   const [textExpanded, setTextExpanded] = useState(false);
   const [mediaExpanded, setMediaExpanded] = useState(false);
   const navigate = useNavigate();
+  const { ref: actionsRef, isVisible: actionsVisible } = useIsVisible<HTMLDivElement>();
 
   // Resolve repost/community-approval wrappers to the original event.
   const { event: displayEvent, wrapper } = useResolvedEvent(event);
@@ -261,11 +263,17 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
         </div>
 
         {/* Actions */}
-        <div className="mt-2 pl-11" onClick={(e) => e.stopPropagation()}>
+        <div
+          ref={actionsRef}
+          className="mt-2 pl-11"
+          onClick={(e) => e.stopPropagation()}
+        >
           {isRss ? (
             <RssOpenRow event={displayEvent} compact />
+          ) : actionsVisible ? (
+            <PostActions event={displayEvent} compact enabled={actionsVisible} />
           ) : (
-            <PostActions event={displayEvent} compact />
+            <div className="h-5" aria-hidden="true" />
           )}
         </div>
 
