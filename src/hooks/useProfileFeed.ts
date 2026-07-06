@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useAppContext } from '@/hooks/useAppContext';
@@ -251,7 +251,9 @@ export function useProfileFeed(pubkey: string) {
   }, [pubkey, hasMore, mergeEvents, queryEachRelay, querySingleRelay, refreshHasMore, expandCursor, markRelayDone, ensureCursor]);
 
   // ── Initial load ───────────────────────────────────────────────────────────
-  useEffect(() => {
+  // Use layout effect so state is reset synchronously when the pubkey changes,
+  // preventing a flash of stale "End of history" from the previous profile.
+  useLayoutEffect(() => {
     setEvents([]);
     setIsLoading(true);
     setHasMore(true);
@@ -275,9 +277,9 @@ export function useProfileFeed(pubkey: string) {
             expandCursor(url, batch);
             mergeEvents(batch);
           }
-          if (batch.length < PAGE_SIZE) {
-            markRelayDone(url);
-          }
+          // Do NOT mark relays done here: relays may return fewer than
+          // PAGE_SIZE because of their own internal limit, not because the
+          // profile has no more history. Let the older crawl prove exhaustion.
         }
         refreshHasMore();
       } catch {
