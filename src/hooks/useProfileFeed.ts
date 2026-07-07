@@ -80,22 +80,21 @@ export function useProfileFeed(pubkey: string) {
 
     setEvents((prev) => {
       let added = false;
-      const newEvents: NostrEvent[] = [];
       const next = [...prev];
       for (const ev of incoming) {
         if (!seenIdsRef.current.has(ev.id)) {
           seenIdsRef.current.add(ev.id);
           next.push(ev);
-          newEvents.push(ev);
           added = true;
         }
       }
       if (!added) return prev;
       
-      // Cache the new events for this pubkey
-      cacheEventsForPubkey(pubkey, next);
+      // Sort and cache the complete combined view
+      const sorted = next.sort((a, b) => b.created_at - a.created_at);
+      cacheEventsForPubkey(pubkey, sorted);
       
-      return next.sort((a, b) => b.created_at - a.created_at);
+      return sorted;
     });
   }, [pubkey]);
 
@@ -257,7 +256,13 @@ export function useProfileFeed(pubkey: string) {
     }
   }, [pubkey, hasMore, mergeEvents, queryEachRelay, querySingleRelay, refreshHasMore, expandCursor, markRelayDone, ensureCursor]);
 
-  // ── Initial load ───────────────────────────────────────────────────────────
+  // ── Cache final events when initial load completes ───────────────────────────
+  useEffect(() => {
+    if (!isLoading && events.length > 0) {
+      // Cache the complete combined view (already sorted)
+      cacheEventsForPubkey(pubkey, events);
+    }
+  }, [isLoading, events, pubkey]);
   // Use layout effect so state is reset synchronously when the pubkey changes,
   // preventing a flash of stale "End of history" from the previous profile.
   useLayoutEffect(() => {
