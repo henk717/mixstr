@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useAppContext } from '@/hooks/useAppContext';
-import { cacheEvents, getCachedEventsForPubkey } from '@/lib/fetchCachedEvent';
+import { cacheEvents, getCachedEventsForPubkey, cacheEventsForPubkey } from '@/lib/fetchCachedEvent';
 
 const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
 const PAGE_SIZE = 250;
