@@ -2,6 +2,7 @@ import { useNostr } from '@nostrify/react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useFollowing } from './useFollowing';
+import { cacheEvents } from '@/lib/fetchCachedEvent';
 
 const PAGE_SIZE = 30;
 
@@ -34,7 +35,7 @@ export function useFollowingFeed() {
 
       const all = results.flat();
       const seen = new Set<string>();
-      return all
+      const uniqueEvents = all
         .filter((e) => {
           if (seen.has(e.id)) return false;
           seen.add(e.id);
@@ -42,6 +43,11 @@ export function useFollowingFeed() {
         })
         .sort((a, b) => b.created_at - a.created_at)
         .slice(0, PAGE_SIZE);
+      
+      // Cache the events for faster access
+      cacheEvents(uniqueEvents);
+      
+      return uniqueEvents;
     },
     getNextPageParam: (lastPage) => {
       if (lastPage.length < PAGE_SIZE) return undefined;

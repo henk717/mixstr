@@ -3,10 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { fetchEventWithRelays } from '@/lib/queryEvent';
 import { getParentEventId } from '@/lib/postUtils';
+import { cacheEvents } from '@/lib/fetchCachedEvent';
 
 /**
  * Fetches the full thread chain of ancestors for a given event.
  * Returns events in chronological order (oldest first), NOT including the starting event.
+ * 
+ * Events are cached for faster access across page navigations.
  */
 export function useThreadChain(eventId: string, author?: string) {
   const { nostr } = useNostr();
@@ -62,6 +65,9 @@ export function useThreadChain(eventId: string, author?: string) {
         currentAuthor = parentRef.author ?? currentAuthor;
         maxDepth--;
       }
+      
+      // Cache all fetched events
+      cacheEvents(chain);
       
       // Reverse to get chronological order (oldest first)
       return chain.reverse();
