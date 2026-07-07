@@ -256,13 +256,7 @@ export function useProfileFeed(pubkey: string) {
     }
   }, [pubkey, hasMore, mergeEvents, queryEachRelay, querySingleRelay, refreshHasMore, expandCursor, markRelayDone, ensureCursor]);
 
-  // ── Cache final events when initial load completes ───────────────────────────
-  useEffect(() => {
-    if (!isLoading && events.length > 0) {
-      // Cache the complete combined view (already sorted)
-      cacheEventsForPubkey(pubkey, events);
-    }
-  }, [isLoading, events, pubkey]);
+  // ── Initial load ───────────────────────────────────────────────────────────
   // Use layout effect so state is reset synchronously when the pubkey changes,
   // preventing a flash of stale "End of history" from the previous profile.
   useLayoutEffect(() => {

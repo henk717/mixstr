@@ -11,14 +11,21 @@ export function getCachedEventsForPubkey(pubkey: string): NostrEvent[] {
     const profileCacheKey = `profile_${pubkey}`;
     const cached = getCachedEvent(profileCacheKey);
     
+    console.log('[EventCache] Profile lookup:', profileCacheKey, '- found:', cached ? Array.isArray(cached) ? `${cached.length} events` : 'not array' : 'nothing');
+    
     if (cached && Array.isArray(cached)) {
-      return cached.filter(
+      const validEvents = cached.filter(
         (e) => typeof e === 'object' && e && 'id' in e && 'pubkey' in e
       ) as NostrEvent[];
+      
+      console.log('[EventCache] Profile restore:', validEvents.length, 'valid events');
+      return validEvents;
     }
     
+    console.log('[EventCache] Profile cache miss for:', pubkey.slice(0, 16));
     return [];
-  } catch {
+  } catch (error) {
+    console.warn('[EventCache] Profile cache error:', error);
     return [];
   }
 }
@@ -31,6 +38,9 @@ export function cacheEventsForPubkey(pubkey: string, events: NostrEvent[]): void
     const profileCacheKey = `profile_${pubkey}`;
     // Store the most recent events (limit to avoid localStorage issues)
     const eventsToCache = events.slice(0, 100);
+    
+    console.log('[EventCache] Profile store:', profileCacheKey, '- caching', eventsToCache.length, 'events');
+    
     cacheEvent(profileCacheKey, eventsToCache);
     
     // Also cache individual events for instant access
