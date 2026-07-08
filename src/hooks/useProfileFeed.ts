@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNostr } from '@nostrify/react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useAppContext } from '@/hooks/useAppContext';
-import { cacheEvents, getCachedEventsForPubkey, cacheEventsForPubkey } from '@/lib/fetchCachedEvent';
 
 const KINDS = [1, 6, 20, 30023, 30311, 31337, 34235];
 const PAGE_SIZE = 250;
@@ -89,14 +88,9 @@ export function useProfileFeed(pubkey: string) {
         }
       }
       if (!added) return prev;
-      
-      // Sort and cache the complete combined view
-      const sorted = next.sort((a, b) => b.created_at - a.created_at);
-      cacheEventsForPubkey(pubkey, sorted);
-      
-      return sorted;
+      return next.sort((a, b) => b.created_at - a.created_at);
     });
-  }, [pubkey]);
+  }, []);
 
   const ensureCursor = useCallback((url: string) => {
     let cursor = perRelayCursorRef.current.get(url);
@@ -260,19 +254,13 @@ export function useProfileFeed(pubkey: string) {
   // Use layout effect so state is reset synchronously when the pubkey changes,
   // preventing a flash of stale "End of history" from the previous profile.
   useLayoutEffect(() => {
-    // Load cached events first for instant rendering
-    const cachedEvents = getCachedEventsForPubkey(pubkey);
-    
-    setEvents(cachedEvents.sort((a, b) => b.created_at - a.created_at));
+    setEvents([]);
     setIsLoading(true);
     setHasMore(true);
     setIsFetchingOlder(false);
     seenIdsRef.current = new Set();
     fetchingOlderRef.current = false;
     perRelayCursorRef.current = new Map();
-    
-    // Mark cached events as seen
-    cachedEvents.forEach((ev) => seenIdsRef.current.add(ev.id));
 
     let cancelled = false;
 

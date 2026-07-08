@@ -2,8 +2,6 @@ import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { fetchEventWithRelays } from '@/lib/queryEvent';
-import { fetchCachedEvent } from '@/lib/fetchCachedEvent';
-import { getCachedEvent } from '@/lib/eventCacheStore';
 
 interface UseEventByIdOptions {
   eventId: string;
@@ -21,8 +19,6 @@ interface UseEventByIdOptions {
  * Fetch a single Nostr event by id, with optional author/kind constraints
  * and relay hints. The pool is always queried, but any provided relay hints
  * are also probed directly and the first successful result wins.
- * 
- * Now includes browser caching for faster, more consistent access across pages.
  */
 export function useEventById(options: UseEventByIdOptions) {
   const {
@@ -50,15 +46,6 @@ export function useEventById(options: UseEventByIdOptions) {
     queryFn: async ({ signal }) => {
       if (!eventId) return null;
 
-      // For simple id-based queries, use the cached fetch
-      if (!kind && !pubkey && !relayHints) {
-        return await fetchCachedEvent(nostr, eventId, { 
-          timeoutMs: timeoutMs ?? 6000,
-          signal,
-        });
-      }
-
-      // For more complex queries with constraints, fall back to relay fetch
       let filter;
       if (kind && pubkey) {
         filter = [{ kinds: [kind], authors: [pubkey], '#d': [eventId], limit: 1 }];
@@ -73,12 +60,6 @@ export function useEventById(options: UseEventByIdOptions) {
         timeoutMs: timeoutMs ?? 6000,
         signal,
       });
-      
-      // Cache the result for future use
-      if (ev) {
-        // We'll cache it in the queryFn of fetchCachedEvent when called directly
-      }
-      
       return ev ?? null;
     },
     enabled: !!eventId && enabled,
@@ -87,11 +68,5 @@ export function useEventById(options: UseEventByIdOptions) {
     refetchOnWindowFocus,
     retry: 2,
     retryDelay: 500,
-    // Provide initial data from cache for instant rendering
-    initialData: () => {
-      if (!eventId || !enabled) return undefined;
-      const cached = getCachedEvent(eventId);
-      return (cached as NostrEvent | undefined) ?? undefined;
-    },
   });
 }
