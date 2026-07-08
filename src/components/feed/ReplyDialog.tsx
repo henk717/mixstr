@@ -149,7 +149,8 @@ export function ReplyDialog({ open, onClose, replyTo }: ReplyDialogProps) {
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Write your reply…"
-              className="border-0 bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[100px] shadow-none"
+              className="border-0 bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[100px] shadow-none break-words"
+              style={{ wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap' }}
               disabled={isPending}
             />
           </div>
