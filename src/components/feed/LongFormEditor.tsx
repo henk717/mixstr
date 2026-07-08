@@ -57,7 +57,10 @@ export function LongFormEditor({
         onChange={handleChange}
         placeholder={placeholder}
         disabled={disabled}
-        containerProps={{ className: 'min-h-[280px] max-h-[60vh] overflow-y-auto' }}
+        containerProps={{ 
+          className: 'min-h-[280px] max-h-[60vh] overflow-y-auto break-words',
+          style: { wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap' }
+        }}
       />
     </div>
   );
