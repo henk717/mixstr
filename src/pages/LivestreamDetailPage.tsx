@@ -177,7 +177,7 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
         {event && info && (
           <>
             {/* Main content area */}
-            <div className="max-w-full px-4 pb-4 lg:pr-0" style={{ paddingRight: isChatCollapsed ? '64px' : '336px' }}>
+            <div className={`max-w-full px-4 pb-4 ${isChatCollapsed ? 'lg:pr-[64px]' : 'lg:pr-[336px]'}`}>
              {/* Video player - full width */}
              <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-lg">
                {info.streamUrl ? (
