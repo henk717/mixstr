@@ -32,6 +32,7 @@ import { useAuthor } from '@/hooks/useAuthor';
 import { useParentEvent } from '@/hooks/useParentEvent';
 import { useResolvedEvent } from '@/hooks/useResolvedEvent';
 import { useIsVisible } from '@/hooks/useIsVisible';
+import { useMuteList } from '@/hooks/useMuteList';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -73,6 +74,8 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const reply = isReply(displayEvent);
   const parentRef = reply ? getParentEventId(displayEvent) : null;
   const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
+  const { isMuted } = useMuteList();
+  const showParentPreview = parentEvent && !isMuted(parentEvent);
   const longform = isLongform(displayEvent);
   const title = getEventTitle(displayEvent);
   const cover = getCoverImage(displayEvent);
@@ -111,16 +114,20 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
       )}
 
       {/* ── Parent context (long view shows full parent preview above the reply) ── */}
-      {reply && parentEvent && (
+      {reply && showParentPreview && (
         <ReplyParentPreview
-          parent={parentEvent}
-          onParentClick={() => navigate(`/${eventToNevent(parentEvent)}`)}
+          parent={parentEvent!}
+          onParentClick={() => navigate(`/${eventToNevent(parentEvent!)}`)}
           className="pt-4"
         />
       )}
-      {reply && !parentEvent && parentRef && (
+      {reply && parentRef && !showParentPreview && (
         <div className="pt-2 pb-0">
-          <ReplyingToChip parentId={parentRef.id} isPending={parentPending} />
+          <ReplyingToChip
+            parentId={parentRef.id}
+            parent={showParentPreview ? parentEvent : undefined}
+            isPending={parentPending}
+          />
         </div>
       )}
 
@@ -278,6 +285,10 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
 function CommentPreview({ eventId, nevent, enabled = true }: { eventId: string; nevent: string; enabled?: boolean }) {
   const navigate = useNavigate();
   const { data: comments = [], isLoading } = useTopComments(eventId, 3, enabled);
+  const { isMuted } = useMuteList();
+
+  // Filter out comments from blocked users
+  const filteredComments = comments.filter((comment) => !isMuted(comment));
 
   if (isLoading) {
     return (
@@ -292,11 +303,11 @@ function CommentPreview({ eventId, nevent, enabled = true }: { eventId: string; 
     );
   }
 
-  if (comments.length === 0) return null;
+  if (filteredComments.length === 0) return null;
 
   return (
     <div className="mt-3 space-y-2 pl-3 border-l-2 border-border/40">
-      {comments.map((comment) => (
+      {filteredComments.map((comment) => (
         <CommentPreviewItem key={comment.id} comment={comment} />
       ))}
       <button
@@ -326,15 +337,17 @@ function CommentPreviewItem({ comment }: { comment: NostrEvent }) {
           </AvatarFallback>
         </Avatar>
       </Link>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <Link
           to={`/${npub}`}
           onClick={(e) => e.stopPropagation()}
           className="text-xs font-semibold text-foreground/80 hover:text-primary transition-colors"
         >
           {displayName}
-        </Link>{' '}
-        <span className="text-xs text-muted-foreground line-clamp-2">{comment.content}</span>
+        </Link>
+        <div className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+          <NoteContent event={comment} disableEmbeds disableMediaEmbeds disableNoteEmbeds />
+        </div>
       </div>
     </div>
   );

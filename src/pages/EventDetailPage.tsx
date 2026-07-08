@@ -103,22 +103,28 @@ function EventDetailBody({ event, wrapper }: { event: NostrEvent; wrapper?: Nost
   const reply = isReply(event);
   const parentRef = reply ? getParentEventId(event) : null;
   const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
+  const { isMuted } = useMuteList();
+  const showParentPreview = parentEvent && !isMuted(parentEvent);
 
   return (
     <>
       {/* Parent context above a reply */}
       {reply && parentRef && (
         <div className="border-b border-border">
-          {parentEvent ? (
+          {showParentPreview ? (
             <ReplyParentPreview
-              parent={parentEvent}
+              parent={parentEvent!}
               onParentClick={() =>
-                navigate(`/${eventToNevent(parentEvent, parentRef?.relay ? [parentRef.relay] : undefined)}`)
+                navigate(`/${eventToNevent(parentEvent!, parentRef?.relay ? [parentRef.relay] : undefined)}`)
               }
             />
           ) : (
             <div className="pt-2 pb-0">
-              <ReplyingToChip parentId={parentRef.id} isPending={parentPending} />
+              <ReplyingToChip
+                parentId={parentRef.id}
+                parent={parentEvent && !isMuted(parentEvent) ? parentEvent : undefined}
+                isPending={parentPending}
+              />
             </div>
           )}
         </div>
@@ -208,12 +214,25 @@ function AllReplies({ eventId }: { eventId: string }) {
     staleTime: 60 * 1000,
   });
 
+  // Also filter out replies where the reply itself is a reply to a blocked user
+  const filteredReplies = replies.filter((reply) => {
+    const replyToEventId = reply.tags.find((tag) => tag[0] === 'e' && tag[1])?.[1];
+    if (!replyToEventId) return true;
+    // Check if any 'p' tag in the reply points to a blocked user
+    const replyToAuthor = reply.tags.find((tag) => tag[0] === 'p')?.[1];
+    if (replyToAuthor) {
+      const dummyEvent = { pubkey: replyToAuthor, content: '', tags: [], id: '', created_at: 0, sig: '' } as NostrEvent;
+      return !isMuted(dummyEvent);
+    }
+    return true;
+  });
+
   return (
     <div>
       <div className="px-4 py-3 flex items-center gap-2 border-b border-border">
         <MessageCircle size={16} className="text-primary" />
         <h2 className="text-sm font-semibold text-foreground">
-          {isLoading ? 'Loading replies…' : `${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`}
+          {isLoading ? 'Loading replies…' : `${filteredReplies.length} ${filteredReplies.length === 1 ? 'reply' : 'replies'}`}
         </h2>
       </div>
 
@@ -232,7 +251,7 @@ function AllReplies({ eventId }: { eventId: string }) {
         </div>
       )}
 
-      {!isLoading && replies.length === 0 && (
+      {!isLoading && filteredReplies.length === 0 && (
         <Card className="border-dashed mx-4 my-6">
           <CardContent className="py-8 text-center text-muted-foreground text-sm">
             No replies yet. Be the first to reply!
@@ -240,7 +259,7 @@ function AllReplies({ eventId }: { eventId: string }) {
         </Card>
       )}
 
-      {replies.map((reply) => (
+      {filteredReplies.map((reply) => (
         <ReplyItem key={reply.id} reply={reply} />
       ))}
     </div>
