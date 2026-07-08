@@ -91,7 +91,7 @@ export function FeedView({
   moderation,
   emptyMessage,
 }: FeedViewProps) {
-  const { isMuted } = useMuteList();
+  const { isMuted, isLoading: isBlocklistLoading } = useMuteList();
   const { spamSettings } = useMixstr();
 
   // Merge flat events or pages into one deduplicated list
@@ -123,7 +123,7 @@ export function FeedView({
   const visibleEvents = useMemo(
     () => allEvents.filter((e) => !isMuted(e, speedIndex)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allEvents, isMuted, speedIndex],
+    [allEvents, isMuted, speedIndex, isBlocklistLoading],
   );
 
   if (isLoading && allEvents.length === 0) {

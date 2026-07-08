@@ -103,7 +103,7 @@ function EventDetailBody({ event, wrapper }: { event: NostrEvent; wrapper?: Nost
   const reply = isReply(event);
   const parentRef = reply ? getParentEventId(event) : null;
   const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
-  const { isMuted } = useMuteList();
+  const { isMuted, isLoading: isBlocklistLoading } = useMuteList();
   const showParentPreview = parentEvent && !isMuted(parentEvent);
 
   return (
@@ -198,9 +198,9 @@ function WrapperBanner({ wrapper }: { wrapper: NostrEvent }) {
 
 function AllReplies({ eventId }: { eventId: string }) {
   const { nostr } = useNostr();
-  const { isMuted } = useMuteList();
+  const { isMuted, isLoading: isBlocklistLoading } = useMuteList();
 
-  const { data: replies = [], isLoading } = useQuery<NostrEvent[]>({
+  const { data: replies = [], isLoading: isRepliesLoading } = useQuery<NostrEvent[]>({
     queryKey: ['nostr', 'all-replies', eventId],
     queryFn: async ({ signal }) => {
       const events = await nostr.query(
@@ -213,6 +213,9 @@ function AllReplies({ eventId }: { eventId: string }) {
     },
     staleTime: 60 * 1000,
   });
+
+  // Wait for both the blocklist and replies to load before displaying
+  const isLoading = isBlocklistLoading || isRepliesLoading;
 
   // Also filter out replies where the reply itself is a reply to a blocked user
   const filteredReplies = replies.filter((reply) => {
@@ -227,12 +230,15 @@ function AllReplies({ eventId }: { eventId: string }) {
     return true;
   });
 
+  // Only show replies after blocklist has loaded
+  const displayReplies = isLoading ? [] : filteredReplies;
+
   return (
     <div>
       <div className="px-4 py-3 flex items-center gap-2 border-b border-border">
         <MessageCircle size={16} className="text-primary" />
         <h2 className="text-sm font-semibold text-foreground">
-          {isLoading ? 'Loading replies…' : `${filteredReplies.length} ${filteredReplies.length === 1 ? 'reply' : 'replies'}`}
+          {isLoading ? 'Loading replies…' : `${displayReplies.length} ${displayReplies.length === 1 ? 'reply' : 'replies'}`}
         </h2>
       </div>
 
@@ -251,7 +257,7 @@ function AllReplies({ eventId }: { eventId: string }) {
         </div>
       )}
 
-      {!isLoading && filteredReplies.length === 0 && (
+      {!isLoading && displayReplies.length === 0 && (
         <Card className="border-dashed mx-4 my-6">
           <CardContent className="py-8 text-center text-muted-foreground text-sm">
             No replies yet. Be the first to reply!
@@ -259,7 +265,7 @@ function AllReplies({ eventId }: { eventId: string }) {
         </Card>
       )}
 
-      {filteredReplies.map((reply) => (
+      {displayReplies.map((reply) => (
         <ReplyItem key={reply.id} reply={reply} />
       ))}
     </div>

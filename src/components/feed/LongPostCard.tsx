@@ -74,7 +74,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const reply = isReply(displayEvent);
   const parentRef = reply ? getParentEventId(displayEvent) : null;
   const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
-  const { isMuted } = useMuteList();
+  const { isMuted, isLoading: isBlocklistLoading } = useMuteList();
   const showParentPreview = parentEvent && !isMuted(parentEvent);
   const longform = isLongform(displayEvent);
   const title = getEventTitle(displayEvent);
@@ -284,11 +284,14 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
 
 function CommentPreview({ eventId, nevent, enabled = true }: { eventId: string; nevent: string; enabled?: boolean }) {
   const navigate = useNavigate();
-  const { data: comments = [], isLoading } = useTopComments(eventId, 3, enabled);
-  const { isMuted } = useMuteList();
+  const { data: comments = [], isLoading: isCommentsLoading } = useTopComments(eventId, 3, enabled);
+  const { isMuted, isLoading: isBlocklistLoading } = useMuteList();
 
-  // Filter out comments from blocked users
-  const filteredComments = comments.filter((comment) => !isMuted(comment));
+  // Wait for both comments and blocklist to load
+  const isLoading = isCommentsLoading || isBlocklistLoading;
+
+  // Filter out comments from blocked users (only after blocklist loads)
+  const filteredComments = isLoading ? [] : comments.filter((comment) => !isMuted(comment));
 
   if (isLoading) {
     return (

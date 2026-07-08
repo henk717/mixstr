@@ -227,8 +227,8 @@ function NotificationsWithContext({ notifications }: { notifications: NostrEvent
 export function NotificationsPage() {
   useSeoMeta({ title: 'Notifications · Mixstr' });
   const { user } = useCurrentUser();
-  const { data: notifications = [], isLoading, refetch, isFetching } = useNotifications();
-  const { isMuted } = useMuteList();
+  const { data: notifications = [], isLoading: isNotificationsLoading, refetch, isFetching } = useNotifications();
+  const { isMuted, isLoading: isBlocklistLoading } = useMuteList();
   const { setLastNotificationReadAt } = useMixstr();
   
   // Mark notifications as read when the page is opened
@@ -239,8 +239,11 @@ export function NotificationsPage() {
     }
   }, [user, setLastNotificationReadAt]);
 
-  // Filter out notifications from blocked users
-  const filteredNotifications = notifications.filter((event) => !isMuted(event));
+  // Wait for both notifications and blocklist to load
+  const isLoading = isNotificationsLoading || isBlocklistLoading;
+
+  // Filter out notifications from blocked users (only after blocklist loads)
+  const filteredNotifications = isLoading ? [] : notifications.filter((event) => !isMuted(event));
 
   if (!user) {
     return (
@@ -285,20 +288,20 @@ export function NotificationsPage() {
         </div>
       )}
 
-       {!isLoading && filteredNotifications.length === 0 && (
-         <Card className="border-dashed mx-4 my-8">
-           <CardContent className="py-12 px-8 text-center">
-             <Bell size={32} className="text-muted-foreground mx-auto mb-3" />
-             <p className="text-muted-foreground text-sm">
-               No notifications yet. When people react, reply, or zap your posts, they'll appear here.
-             </p>
-           </CardContent>
-         </Card>
-       )}
+      {!isLoading && filteredNotifications.length === 0 && (
+        <Card className="border-dashed mx-4 my-8">
+          <CardContent className="py-12 px-8 text-center">
+            <Bell size={32} className="text-muted-foreground mx-auto mb-3" />
+            <p className="text-muted-foreground text-sm">
+              No notifications yet. When people react, reply, or zap your posts, they'll appear here.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
-       {!isLoading && filteredNotifications.length > 0 && (
-         <NotificationsWithContext notifications={filteredNotifications} />
-       )}
+      {!isLoading && filteredNotifications.length > 0 && (
+        <NotificationsWithContext notifications={filteredNotifications} />
+      )}
     </div>
   );
 }
