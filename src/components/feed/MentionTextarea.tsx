@@ -93,6 +93,16 @@ export function MentionTextarea({
     onChange?.(e);
     // Defer so the cursor has settled after the controlled update.
     requestAnimationFrame(computeMentionState);
+    // Auto-resize textarea
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.style.height = 'auto';
+        const newHeight = Math.min(el.scrollHeight, 400);
+        el.style.height = `${newHeight}px`;
+        el.style.overflowY = newHeight >= 400 ? 'auto' : 'hidden';
+      }
+    });
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {

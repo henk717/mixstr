@@ -233,7 +233,8 @@ export function ComposeDialog({ open, onClose }: ComposeDialogProps) {
                   onChange={(e) => setNoteContent(e.target.value)}
                   onKeyDown={handleNoteKeyDown}
                   placeholder="What's on your mind?"
-                  className="border-0 bg-transparent p-0 text-base focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[140px] max-h-[200px] overflow-y-auto shadow-none"
+                  className="border-0 bg-transparent p-0 text-base focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[140px] shadow-none break-words"
+                  style={{ wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap' }}
                   disabled={isPending}
                 />
               </div>
