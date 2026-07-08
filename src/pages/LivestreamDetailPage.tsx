@@ -10,7 +10,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useEventById } from '@/hooks/useEventById';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useMuteList } from '@/hooks/useMuteList';
-import { getLivestreamInfo, relativeTime } from '@/lib/postUtils';
+import { getLivestreamInfo } from '@/lib/postUtils';
 import { ChatMessage } from '@/components/feed/ChatMessage';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -258,9 +258,11 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
                    <Badge variant="secondary" className="text-xs">Ended</Badge>
                  )}
 
-                 <span className="text-xs text-muted-foreground ml-auto">
-                   {relativeTime(event.created_at)}
-                 </span>
+                  <Link to={`/${hostNpub}`}>
+                    <Button size="sm" className="h-7 text-xs">
+                      Follow
+                    </Button>
+                  </Link>
                </div>
 
                {/* Summary */}
