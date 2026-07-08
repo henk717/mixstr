@@ -196,7 +196,7 @@ export function ComposeDialog({ open, onClose }: ComposeDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden">
+      <DialogContent className="sm:max-w-2xl p-0 gap-0 max-h-[90dvh] overflow-hidden overflow-y-auto">
         <DialogHeader className="px-5 pt-5 pb-0">
           <DialogTitle className="sr-only">New post</DialogTitle>
           <DialogDescription className="sr-only">
@@ -233,7 +233,7 @@ export function ComposeDialog({ open, onClose }: ComposeDialogProps) {
                   onChange={(e) => setNoteContent(e.target.value)}
                   onKeyDown={handleNoteKeyDown}
                   placeholder="What's on your mind?"
-                  className="border-0 bg-transparent p-0 text-base focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[140px] shadow-none"
+                  className="border-0 bg-transparent p-0 text-base focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[140px] max-h-[200px] overflow-y-auto shadow-none"
                   disabled={isPending}
                 />
               </div>
