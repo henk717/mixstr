@@ -9,6 +9,7 @@ import { useAuthor } from '@/hooks/useAuthor';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useEventById } from '@/hooks/useEventById';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useMuteList } from '@/hooks/useMuteList';
 import { getLivestreamInfo, relativeTime } from '@/lib/postUtils';
 import { ChatMessage } from '@/components/feed/ChatMessage';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -62,8 +63,30 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
   // The naddr coordinate used as the 'a' tag for live chat messages
   const aTagValue = `30311:${pubkey}:${dTag}`;
 
+  // Get current user's blocklist
+  const { isMuted: isUserMuted, isLoading: isUserBlocklistLoading } = useMuteList();
+
+  // Fetch streamer's blocklist (kind 10000) to combine with user's blocklist
+  const { data: streamerBlocklist = new Set<string>(), isLoading: isStreamerBlocklistLoading } = useQuery<Set<string>>({
+    queryKey: ['nostr', 'streamer-blocklist', hostPubkey],
+    queryFn: async ({ signal }) => {
+      const [ev] = await nostr.query(
+        [{ kinds: [10000], authors: [hostPubkey], limit: 1 }],
+        { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) },
+      );
+      if (!ev) return new Set<string>();
+      const blocked = new Set<string>();
+      for (const tag of ev.tags) {
+        if (tag[0] === 'p' && tag[1]) blocked.add(tag[1]);
+      }
+      return blocked;
+    },
+    enabled: !!hostPubkey,
+    staleTime: 2 * 60 * 1000,
+  });
+
   // Fetch live chat messages (kind 1311 tagged with this stream's 'a' coordinate)
-  const { data: chatMessages = [] } = useQuery<NostrEvent[]>({
+  const { data: chatMessages = [], isLoading: isChatLoading } = useQuery<NostrEvent[]>({
     queryKey: ['nostr', 'live-chat', aTagValue],
     queryFn: async ({ signal }) => {
       const events = await nostr.query(
@@ -76,6 +99,16 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
     staleTime: 5 * 1000,
     refetchInterval: 10 * 1000,
   });
+
+  // Combined filtering: hide messages from users blocked by either the viewer or the streamer
+  const isBlockedByViewer = (event: NostrEvent) => isUserMuted(event);
+  const isBlockedByStreamer = (event: NostrEvent) => streamerBlocklist.has(event.pubkey);
+  const isBlocked = (event: NostrEvent) => isBlockedByViewer(event) || isBlockedByStreamer(event);
+
+  // Wait for all blocklists to load before filtering
+  const isBlocklistsLoading = isUserBlocklistLoading || isStreamerBlocklistLoading;
+  const isLoadingMessages = isChatLoading || isBlocklistsLoading;
+  const filteredChatMessages = isLoadingMessages ? [] : chatMessages.filter((msg) => !isBlocked(msg));
 
   // Scroll chat to bottom when new messages arrive
   useEffect(() => {
@@ -255,20 +288,36 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
                 <MessageCircle size={14} className="text-primary" />
                 <span className="text-sm font-semibold">Live Chat</span>
                 <span className="text-xs text-muted-foreground ml-auto">
-                  {chatMessages.length} messages
+                  {isLoadingMessages
+                    ? 'Loading…'
+                    : `${filteredChatMessages.length} ${filteredChatMessages.length === 1 ? 'message' : 'messages'}`
+                  }
                 </span>
               </div>
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0">
-                {chatMessages.length === 0 && (
+                {isLoadingMessages && (
+                  <div className="space-y-1">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="py-1.5 px-1">
+                        <div className="flex gap-2">
+                          <Skeleton className="w-16 h-3 flex-shrink-0" />
+                          <Skeleton className="h-3 flex-1" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!isLoadingMessages && filteredChatMessages.length === 0 && (
                   <p className="text-xs text-muted-foreground text-center py-6">
                     {isLive ? 'No messages yet. Be the first to chat!' : 'No chat messages for this stream.'}
                   </p>
                 )}
-                {chatMessages.map((msg) => (
-                  <ChatMessage key={msg.id} event={msg} />
-                ))}
+                {!isLoadingMessages &&
+                  filteredChatMessages.map((msg) => (
+                    <ChatMessage key={msg.id} event={msg} />
+                  ))}
                 <div ref={chatEndRef} />
               </div>
 
