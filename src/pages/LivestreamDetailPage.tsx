@@ -174,10 +174,10 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
          </Card>
        )}
 
-       {event && info && (
-         <>
-           {/* Main content area */}
-           <div className={`max-w-4xl mx-auto px-4 pb-4 transition-all ${isChatCollapsed ? 'lg:pr-12' : 'lg:pr-80 xl:pr-96'}`}>
+        {event && info && (
+          <>
+            {/* Main content area */}
+            <div className="max-w-full px-4 pb-4 lg:pr-0" style={{ paddingRight: isChatCollapsed ? '64px' : '336px' }}>
              {/* Video player - full width */}
              <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-lg">
                {info.streamUrl ? (
