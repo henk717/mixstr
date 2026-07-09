@@ -11,6 +11,7 @@ import { RssAuthorHeader } from './RssAuthorHeader';
 import { RssOpenRow } from './RssOpenRow';
 import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
+import { EmbeddedNaddr } from '@/components/EmbeddedNaddr';
 import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
 import { RepostBanner } from './RepostBanner';
 import { VideoWithVisibility } from '@/components/VideoWithVisibility';
@@ -22,6 +23,8 @@ import {
   getSummary,
   isReply,
   isLongform,
+  isLivestream,
+  getLivestreamInfo,
   eventToNevent,
   getParentEventId,
   hasMedia as eventHasMedia,
@@ -36,6 +39,7 @@ import { useMuteList } from '@/hooks/useMuteList';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import type { AddrCoords } from '@/components/NoteContent';
 
 interface LongPostCardProps {
   event: NostrEvent;
@@ -86,6 +90,16 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const videos = extractVideos(displayEvent);
   const hasAnyMedia = eventHasMedia(displayEvent) || images.length > 0 || videos.length > 0;
 
+  // Check if this is a livestream event and extract naddr coordinates
+  const livestreamInfo = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
+  const livestreamNaddr: AddrCoords | null = livestreamInfo
+    ? {
+        kind: 30311,
+        pubkey: displayEvent.pubkey,
+        identifier: livestreamInfo.dTag,
+      }
+    : null;
+
   // Only clamp text for extremely long text-only posts.
   // If the post has media, always show full text so context isn't cut off.
   const isVeryLong = displayEvent.content.length > TEXT_ONLY_CLAMP;
@@ -97,7 +111,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
       if (link) window.open(link, '_blank', 'noopener,noreferrer');
       return;
     }
-    navigate(`/${nevent}`);
+    navigate(`/${livestreamNaddr ? nip19.naddrEncode(livestreamNaddr) : nevent}`);
   };
 
   return (
@@ -235,10 +249,17 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
               {/* ── Images ── */}
               {images.length > 0 && <FeedImageGallery images={images} />}
 
-              {/* ── Videos ── */}
-              {videos.length > 0 && (
-                <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                  <VideoWithVisibility src={videos[0]} />
+{/* ── Videos ── */}
+{videos.length > 0 && (
+  <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+    <VideoWithVisibility src={videos[0]} />
+  </div>
+)}
+
+              {/* ── Embedded livestream preview (if this is a livestream event) ── */}
+              {livestreamNaddr && (
+                <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                  <EmbeddedNaddr addr={livestreamNaddr} className="my-2.5" />
                 </div>
               )}
 

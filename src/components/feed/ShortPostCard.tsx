@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { ChevronDown, ChevronUp, Play, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { nip19 } from 'nostr-tools';
 import { PostAuthor } from './PostAuthor';
 import { PostActions } from './PostActions';
 import { RssAuthorHeader } from './RssAuthorHeader';
@@ -10,6 +11,7 @@ import { RssOpenRow } from './RssOpenRow';
 import { RepostBanner } from './RepostBanner';
 import { NoteContent } from '@/components/NoteContent';
 import { FeedImageGallery } from './FeedImageGallery';
+import { EmbeddedNaddr } from '@/components/EmbeddedNaddr';
 import { Button } from '@/components/ui/button';
 import { ReplyingToChip } from './ReplyContext';
 import { VideoWithVisibility } from '@/components/VideoWithVisibility';
@@ -22,6 +24,8 @@ import {
   getSummary,
   isReply,
   isLongform,
+  isLivestream,
+  getLivestreamInfo,
   eventToNevent,
   getParentEventId,
   findRelayHintForEvent,
@@ -30,6 +34,7 @@ import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useParentEvent } from '@/hooks/useParentEvent';
 import { useResolvedEvent } from '@/hooks/useResolvedEvent';
 import { useIsVisible } from '@/hooks/useIsVisible';
+import type { AddrCoords } from '@/components/NoteContent';
 
 interface ShortPostCardProps {
   event: NostrEvent;
@@ -66,13 +71,23 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
 
   const hasMedia = images.length > 0 || videos.length > 0 || embeds.length > 0;
 
+  // Check if this is a livestream event and extract naddr coordinates
+  const livestreamInfo = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
+  const livestreamNaddr: AddrCoords | null = livestreamInfo
+    ? {
+        kind: 30311,
+        pubkey: displayEvent.pubkey,
+        identifier: livestreamInfo.dTag,
+      }
+    : null;
+
   const handleCardClick = () => {
     if (isRss) {
       const link = displayEvent.tags.find(([k]) => k === 'link')?.[1];
       if (link) window.open(link, '_blank', 'noopener,noreferrer');
       return;
     }
-    navigate(`/${nevent}`);
+    navigate(`/${livestreamNaddr ? nip19.naddrEncode(livestreamNaddr) : nevent}`);
   };
 
   // Build a compact media hint label e.g. "2 images · 1 video"
@@ -175,16 +190,23 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
                   Show more
                 </button>
               )}
-              {isLong && textExpanded && (
-                <button
-                  className="text-xs text-muted-foreground mt-1 flex items-center gap-1 hover:underline"
-                  onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
-                >
-                  <ChevronUp size={13} />
-                  Collapse
-                </button>
-              )}
-            </>
+{isLong && textExpanded && (
+  <button
+    className="text-xs text-muted-foreground mt-1 flex items-center gap-1 hover:underline"
+    onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
+  >
+    <ChevronUp size={13} />
+    Collapse
+  </button>
+)}
+
+          {/* ── Embedded livestream preview (if this is a livestream event) ── */}
+          {livestreamNaddr && (
+            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+              <EmbeddedNaddr addr={livestreamNaddr} className="my-2.5" />
+            </div>
+          )}
+        </>
           )}
 
           {/* ── Collapsible media strip (short view) ── */}

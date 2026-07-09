@@ -1,23 +1,39 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Wifi, Users } from 'lucide-react';
+import { Wifi, Users, CheckCircle } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
-import { getLivestreamInfo, livestreamToNaddr, relativeTime } from '@/lib/postUtils';
+import { RepostBanner } from './RepostBanner';
+import {
+  getLivestreamInfo,
+  livestreamToNaddr,
+  relativeTime,
+  eventToNevent,
+} from '@/lib/postUtils';
+import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { useResolvedEvent } from '@/hooks/useResolvedEvent';
 
 interface LivestreamCardProps {
   event: NostrEvent;
+  /** Optional community moderation action. */
+  moderation?: { onApprove: () => void };
 }
 
-export function LivestreamCard({ event }: LivestreamCardProps) {
+export function LivestreamCard({ event, moderation }: LivestreamCardProps) {
   const navigate = useNavigate();
-  const info = getLivestreamInfo(event);
+
+  // Resolve repost/community-approval wrappers to the original event.
+  const { event: displayEvent, wrapper } = useResolvedEvent(event);
+  const isRss = isRssSyntheticEvent(displayEvent);
+
+  const info = getLivestreamInfo(displayEvent);
 
   // Use the actual host pubkey (first p-tag with role=Host, fallback to event.pubkey)
-  const hostPubkey = info?.hostPubkey ?? event.pubkey;
+  const hostPubkey = info?.hostPubkey ?? displayEvent.pubkey;
   const author = useAuthor(hostPubkey);
   const meta = author.data?.metadata;
   const npub = nip19.npubEncode(hostPubkey);
@@ -27,20 +43,25 @@ export function LivestreamCard({ event }: LivestreamCardProps) {
   if (!info) return null;
 
   // Addressable events must link via naddr, not nevent
-  const naddr = livestreamToNaddr(event);
+  const naddr = livestreamToNaddr(displayEvent);
   const isLive = info.status === 'live';
   const isEnded = info.status === 'ended';
 
+  const handleCardClick = () => {
+    navigate(`/${naddr}`);
+  };
+
   return (
     <div
-      className="relative mx-4 my-3 rounded-xl overflow-hidden border cursor-pointer group transition-all duration-200 hover:shadow-lg"
-      style={{
-        borderColor: isLive ? 'rgb(220 38 38 / 0.5)' : 'hsl(var(--border))',
-        boxShadow: isLive ? '0 0 0 1px rgb(220 38 38 / 0.2)' : undefined,
-      }}
-      onClick={() => navigate(`/${naddr}`)}
+      className="group cursor-pointer rounded-xl overflow-hidden bg-card border border-border hover:border-primary/50 transition-all duration-200 hover:shadow-lg hover:shadow-primary/10"
+      onClick={handleCardClick}
     >
-      {/* Thumbnail / background */}
+      {/* ── Repost / community approval banner ── */}
+      {wrapper && (
+        <RepostBanner wrapper={wrapper} className="px-3 pt-2 pb-0" />
+      )}
+
+      {/* Thumbnail area */}
       <div className="relative aspect-video bg-black overflow-hidden">
         {info.thumbnail ? (
           <img
@@ -59,7 +80,7 @@ export function LivestreamCard({ event }: LivestreamCardProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
 
         {/* Status badge */}
-        <div className="absolute top-3 left-3">
+        <div className="absolute top-2 left-2">
           {isLive && (
             <Badge className="bg-red-600 text-white border-0 gap-1 text-xs font-bold px-2">
               <Wifi size={10} className="animate-pulse" />
@@ -76,7 +97,7 @@ export function LivestreamCard({ event }: LivestreamCardProps) {
 
         {/* Viewer count */}
         {isLive && info.viewers != null && (
-          <div className="absolute top-3 right-3 flex items-center gap-1 bg-black/70 text-white text-xs px-2 py-0.5 rounded-full">
+          <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/70 text-white text-xs px-2 py-0.5 rounded-full">
             <Users size={10} />
             {info.viewers.toLocaleString()}
           </div>
@@ -103,10 +124,24 @@ export function LivestreamCard({ event }: LivestreamCardProps) {
             >
               {displayName}
             </Link>
-            <span className="text-white/50 text-xs ml-auto">{relativeTime(event.created_at)}</span>
+            <span className="text-white/50 text-xs ml-auto">{relativeTime(displayEvent.created_at)}</span>
           </div>
         </div>
       </div>
+
+      {/* Moderation */}
+      {moderation && (
+        <div className="px-3 pb-3" onClick={(e) => e.stopPropagation()}>
+          <Button
+            size="sm"
+            onClick={moderation.onApprove}
+            className="gap-1.5 h-7 text-xs bg-green-600 hover:bg-green-500 text-white w-full"
+          >
+            <CheckCircle size={13} />
+            Approve
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Play, Image, Plus, Wifi, CheckCircle, Rss } from 'lucide-react';
+import { Play, Image, Plus, Wifi, Users, CheckCircle, Rss } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
@@ -15,9 +15,12 @@ import {
   relativeTime,
   eventToNevent,
   getAudioTrackInfo,
+  livestreamToNaddr,
+  getCoverImage,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useMixstr } from '@/hooks/useMixstr';
@@ -40,13 +43,6 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   const rssLink = isRss ? displayEvent.tags.find(([k]) => k === 'link')?.[1] : undefined;
   const rssFeedTitle = isRss ? displayEvent.tags.find(([k]) => k === 'feedTitle')?.[1] : undefined;
 
-  const author = useAuthor(isRss ? undefined : displayEvent.pubkey);
-  const meta = author.data?.metadata;
-  const npub = nip19.npubEncode(displayEvent.pubkey);
-  const rawName = meta?.display_name || meta?.name || '';
-  const displayName = isRss
-    ? (rssFeedTitle ?? 'RSS Feed')
-    : rawName.trim() || displayEvent.pubkey.slice(0, 10) + '…';
   const { addToQueue } = useMixstr();
 
   const images = extractImages(displayEvent);
@@ -56,16 +52,30 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   const isVideo = videos.length > 0;
   const isEmbed = embeds.length > 0 && !isVideo;
   const embed = embeds[0];
-  const title = getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim();
 
-  // Choose thumbnail: explicit first, then extract a frame from the video if available.
-  const thumbnail = embed?.thumbnail ?? images[0];
+  // For livestreams, use the host pubkey (actual streamer) instead of event author
+  const hostPubkey = livestream?.hostPubkey ?? displayEvent.pubkey;
+  const author = useAuthor(isRss ? undefined : hostPubkey);
+  const meta = author.data?.metadata;
+  const npub = nip19.npubEncode(hostPubkey);
+  const rawName = meta?.display_name || meta?.name || '';
+  const displayName = isRss
+    ? (rssFeedTitle ?? 'RSS Feed')
+    : rawName.trim() || hostPubkey.slice(0, 10) + '…';
+  
+  // For livestreams, use the livestream title and thumbnail
+  const title = livestream?.title ?? (getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim());
+  const livestreamThumbnail = livestream?.thumbnail ?? getCoverImage(displayEvent);
+  
+  // Choose thumbnail: livestream first, then embed, then images, then video frame
+  const thumbnail = livestreamThumbnail ?? embed?.thumbnail ?? images[0];
   const firstVideo = videos[0];
   const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
     !thumbnail && firstVideo ? firstVideo : undefined,
   );
   const displayThumbnail = thumbnail || videoFrame;
   const nevent = eventToNevent(displayEvent);
+  const naddr = livestream ? livestreamToNaddr(displayEvent) : '';
 
   // Nothing displayable
   if (!thumbnail && !isVideo && !isEmbed && !livestream) return null;
@@ -75,7 +85,8 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
       window.open(rssLink, '_blank', 'noopener,noreferrer');
       return;
     }
-    navigate(`/${nevent}`);
+    // Use naddr for livestreams, nevent for everything else
+    navigate(`/${livestream ? naddr : nevent}`);
   };
 
   const handleAddToQueue = (e: React.MouseEvent) => {

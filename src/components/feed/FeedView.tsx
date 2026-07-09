@@ -5,7 +5,6 @@ import { ShortPostCard } from './ShortPostCard';
 import { LongPostCard } from './LongPostCard';
 import { MediaCard } from './MediaCard';
 import { AudioCard } from './AudioCard';
-import { LivestreamCard } from './LivestreamCard';
 import { InfiniteScrollSentinel } from './InfiniteScrollSentinel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,6 +25,20 @@ export interface FeedModeration {
 /** Helper to check livestream status without importing extra */
 function getLivestreamStatus(event: NostrEvent): string {
   return getLivestreamInfo(event)?.status ?? 'ended';
+}
+
+/** Check if livestream has a working RTMP/HLS feed */
+function hasWorkingStreamFeed(event: NostrEvent): boolean {
+  const streamUrl = event.tags.find(([t]) => t === 'streaming')?.[1];
+  if (!streamUrl) return false;
+  // Check for common streaming protocols
+  const url = streamUrl.toLowerCase();
+  return (
+    url.startsWith('rtmp://') ||
+    url.startsWith('hls://') ||
+    url.includes('.m3u8') ||
+    url.includes('hls')
+  );
 }
 
 interface FeedViewProps {
@@ -144,12 +157,21 @@ export function FeedView({
     });
   }
 
-  // Separate live streams — float to top only if showLivestreamsAtTop is enabled
-  const livestreams = showLivestreamsAtTop
-    ? filtered.filter((e) => isLivestream(e) && getLivestreamStatus(e) === 'live')
-    : [];
-  const regularEvents = showLivestreamsAtTop
-    ? filtered.filter((e) => !(isLivestream(e) && getLivestreamStatus(e) === 'live'))
+  // When showLivestreamsAtTop is enabled, livestreams with working RTMP feeds are sorted to the front
+  // They remain in the same grid/list, just ordered first
+  const processedEvents = showLivestreamsAtTop
+    ? [...filtered].sort((a, b) => {
+        const aIsPinnedLivestream = isLivestream(a) && getLivestreamStatus(a) === 'live' && hasWorkingStreamFeed(a);
+        const bIsPinnedLivestream = isLivestream(b) && getLivestreamStatus(b) === 'live' && hasWorkingStreamFeed(b);
+        // Both are pinned livestreams - maintain original order by timestamp
+        if (aIsPinnedLivestream && bIsPinnedLivestream) return 0;
+        // Only a is pinned - put a first
+        if (aIsPinnedLivestream) return -1;
+        // Only b is pinned - put b first
+        if (bIsPinnedLivestream) return 1;
+        // Neither is pinned - maintain original order
+        return 0;
+      })
     : filtered;
 
   const isPaginated = !!fetchNextPage;
@@ -171,66 +193,38 @@ export function FeedView({
 
   return (
     <div>
-      {/* Livestreams always pinned to the top of every feed */}
-      {livestreams.length > 0 && (
-        <div className="py-1">
-          {livestreams.map((event) => (
-            <LivestreamCard key={event.id} event={event} />
-          ))}
-        </div>
-      )}
-
-      {/* Regular content */}
+      {/* All content in one grid/list - livestreams sorted to front when toggle is on */}
       {mode === 'media' && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4">
-          {regularEvents.map((event) => {
+          {processedEvents.map((event) => {
             const mod = moderation?.canApprove(event)
               ? { onApprove: () => moderation.onApprove(event) }
               : undefined;
-            return isLivestream(event) ? (
-              // Livestreams get a full-width slot in the grid (span 2 cols on small, 3 on md)
-              <div key={event.id} className="col-span-2 md:col-span-3">
-                <LivestreamCard event={event} />
-              </div>
-            ) : (
-              <MediaCard key={event.id} event={event} moderation={mod} />
-            );
+            return <MediaCard key={event.id} event={event} moderation={mod} />;
           })}
         </div>
       )}
 
-      {mode === 'audio' && regularEvents.map((event) => {
+      {mode === 'audio' && processedEvents.map((event) => {
         const mod = moderation?.canApprove(event)
           ? { onApprove: () => moderation.onApprove(event) }
           : undefined;
-        return isLivestream(event) ? (
-          <LivestreamCard key={event.id} event={event} />
-        ) : (
-          <AudioCard key={event.id} event={event} moderation={mod} />
-        );
+        return <AudioCard key={event.id} event={event} moderation={mod} />;
       })}
 
-      {mode === 'longform' && regularEvents.map((event) => {
+      {mode === 'longform' && processedEvents.map((event) => {
         const mod = moderation?.canApprove(event)
           ? { onApprove: () => moderation.onApprove(event) }
           : undefined;
-        return isLivestream(event) ? (
-          <LivestreamCard key={event.id} event={event} />
-        ) : (
-          <LongPostCard key={event.id} event={event} moderation={mod} />
-        );
+        return <LongPostCard key={event.id} event={event} moderation={mod} />;
       })}
 
       {(mode === 'short' || (mode !== 'media' && mode !== 'audio' && mode !== 'longform')) &&
-        regularEvents.map((event) => {
+        processedEvents.map((event) => {
           const mod = moderation?.canApprove(event)
             ? { onApprove: () => moderation.onApprove(event) }
             : undefined;
-          return isLivestream(event) ? (
-            <LivestreamCard key={event.id} event={event} />
-          ) : (
-            <ShortPostCard key={event.id} event={event} moderation={mod} />
-          );
+          return <ShortPostCard key={event.id} event={event} moderation={mod} />;
         })
       }
 
