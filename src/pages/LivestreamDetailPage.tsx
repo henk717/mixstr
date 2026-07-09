@@ -10,6 +10,8 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useEventById } from '@/hooks/useEventById';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useMuteList } from '@/hooks/useMuteList';
+import { useFollowing } from '@/hooks/useFollowing';
+import { useFollowMutation } from '@/hooks/useFollowMutation';
 import { getLivestreamInfo } from '@/lib/postUtils';
 import { ChatMessage } from '@/components/feed/ChatMessage';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -19,7 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ArrowLeft, Wifi, Users, Send, MessageCircle, ExternalLink, PanelLeftClose, PanelLeft } from 'lucide-react';
+import { ArrowLeft, Wifi, Users, Send, MessageCircle, ExternalLink, PanelLeftClose, PanelLeft, UserPlus, UserCheck } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 interface LivestreamDetailPageProps {
@@ -36,6 +38,8 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
   const navigate = useNavigate();
   const { user } = useCurrentUser();
   const { mutateAsync: publish, isPending: isSending } = useNostrPublish();
+  const { data: followingList = [] } = useFollowing();
+  const followMutation = useFollowMutation();
   const [chatMsg, setChatMsg] = useState('');
   const [isChatCollapsed, setIsChatCollapsed] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -57,6 +61,7 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
   const hostMeta = hostAuthor.data?.metadata;
   const hostNpub = nip19.npubEncode(hostPubkey);
   const hostName = hostMeta?.display_name || hostMeta?.name || hostPubkey.slice(0, 10) + '…';
+  const isFollowing = followingList.includes(hostPubkey);
 
   const isLive = info?.status === 'live';
 
@@ -136,6 +141,12 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
       e.preventDefault();
       handleSendChat();
     }
+  }
+
+  function handleFollowToggle(e: React.MouseEvent) {
+    e.preventDefault();
+    if (!user) return;
+    followMutation.mutate({ pubkey: hostPubkey, action: isFollowing ? 'unfollow' : 'follow' });
   }
 
    return (
@@ -258,11 +269,27 @@ export function LivestreamDetailPage({ pubkey, dTag, relays }: LivestreamDetailP
                    <Badge variant="secondary" className="text-xs">Ended</Badge>
                  )}
 
-                  <Link to={`/${hostNpub}`}>
-                    <Button size="sm" className="h-7 text-xs">
-                      Follow
-                    </Button>
-                  </Link>
+                   <Button
+                     size="sm"
+                     className="h-7 text-xs gap-1.5"
+                     variant={isFollowing ? 'outline' : 'default'}
+                     onClick={handleFollowToggle}
+                     disabled={followMutation.isPending}
+                   >
+                     {followMutation.isPending ? (
+                       <span className="animate-pulse">…</span>
+                     ) : isFollowing ? (
+                       <>
+                         <UserCheck size={12} />
+                         Following
+                       </>
+                     ) : (
+                       <>
+                         <UserPlus size={12} />
+                         Follow
+                       </>
+                     )}
+                   </Button>
                </div>
 
                {/* Summary */}
