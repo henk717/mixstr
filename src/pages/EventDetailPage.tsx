@@ -110,10 +110,15 @@ function EventDetailBody({ event, wrapper }: { event: NostrEvent; wrapper?: Nost
     ? nip19.naddrEncode({ kind: 30311, pubkey: event.pubkey, identifier: livestreamInfo.dTag })
     : null;
 
-  // Perform redirect for livestreams
+  // Perform redirect for livestreams using useEffect
+  useEffect(() => {
+    if (isLive && livestreamNaddr) {
+      navigate(`/${livestreamNaddr}`, { replace: true });
+    }
+  }, [isLive, livestreamNaddr, navigate]);
+
+  // Show minimal content while redirecting
   if (isLive && livestreamNaddr) {
-    navigate(`/${livestreamNaddr}`, { replace: true });
-    // Show minimal content while redirecting
     return (
       <div className="px-4 py-5 border-b border-border">
         <p className="text-sm text-muted-foreground">Redirecting to livestream page...</p>
