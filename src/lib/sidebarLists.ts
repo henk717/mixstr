@@ -76,8 +76,6 @@ export type SidebarListIcon =
   | 'live';
 
 export interface ListViewOptions {
-  /** Show live streams pinned at the top (opt-in). Default: false */
-  showLivestreamsAtTop?: boolean;
   /** Media view: minimum video duration in seconds (0 = no limit) */
   mediaMinDurationSec?: number;
   /** Media view: maximum video duration in seconds (0 = no limit) */

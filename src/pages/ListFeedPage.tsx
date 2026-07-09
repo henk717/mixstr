@@ -263,11 +263,7 @@ export function ListFeedPage() {
         hasNextPage={hasNextPage}
         isFetchingNextPage={isFetchingNextPage}
         fetchNextPage={fetchNextPage}
-        showLivestreamsAtTop={
-          list.viewOptions?.showLivestreamsAtTop ??
-          // Default to true for lists that are purely livestream sources
-          list.sources.every((s) => s.type === 'livestream')
-        }
+
         viewOptions={list.viewOptions}
         moderation={moderation}
         emptyMessage={

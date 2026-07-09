@@ -1081,22 +1081,7 @@ export function EditListDialog({ open, onClose, initial, onSave }: EditListDialo
           <div className="space-y-3 border-t border-border pt-4">
             <Label className="text-sm font-semibold">View Options</Label>
 
-            {/* Livestream pinning toggle */}
-            <div className="flex items-center justify-between gap-3 bg-card border border-border rounded-lg p-3">
-              <div>
-                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                  <Wifi size={12} className="text-red-500" />
-                  Pin live streams to top
-                </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
-                  Ongoing NIP-53 streams float above the feed when active
-                </p>
-              </div>
-              <Switch
-                checked={viewOptions.showLivestreamsAtTop ?? false}
-                onCheckedChange={(v) => setViewOptions((prev) => ({ ...prev, showLivestreamsAtTop: v }))}
-              />
-            </div>
+
 
             {/* Video duration filter */}
             <div className="bg-card border border-border rounded-lg p-3 space-y-3">

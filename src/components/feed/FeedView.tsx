@@ -8,7 +8,7 @@ import { AudioCard } from './AudioCard';
 import { InfiniteScrollSentinel } from './InfiniteScrollSentinel';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent } from '@/components/ui/card';
-import { hasMedia, isLivestream, getAudioTrackInfo, getLivestreamInfo, getMediaDuration, tryExtractEmbeddedEvent } from '@/lib/postUtils';
+import { hasMedia, isLivestream, getAudioTrackInfo, getMediaDuration, tryExtractEmbeddedEvent } from '@/lib/postUtils';
 import { buildSpeedIndex } from '@/lib/spam';
 import type { ListViewOptions } from '@/lib/sidebarLists';
 import { useMuteList } from '@/hooks/useMuteList';
@@ -22,24 +22,7 @@ export interface FeedModeration {
   onApprove: (event: NostrEvent) => void;
 }
 
-/** Helper to check livestream status without importing extra */
-function getLivestreamStatus(event: NostrEvent): string {
-  return getLivestreamInfo(event)?.status ?? 'ended';
-}
 
-/** Check if livestream has a working RTMP/HLS feed */
-function hasWorkingStreamFeed(event: NostrEvent): boolean {
-  const streamUrl = event.tags.find(([t]) => t === 'streaming')?.[1];
-  if (!streamUrl) return false;
-  // Check for common streaming protocols
-  const url = streamUrl.toLowerCase();
-  return (
-    url.startsWith('rtmp://') ||
-    url.startsWith('hls://') ||
-    url.includes('.m3u8') ||
-    url.includes('hls')
-  );
-}
 
 interface FeedViewProps {
   /** Flat list of events (for non-paginated use) */
@@ -51,8 +34,7 @@ interface FeedViewProps {
   hasNextPage?: boolean;
   isFetchingNextPage?: boolean;
   fetchNextPage?: () => void;
-  /** If true, NIP-53 livestreams with status=live float to the top of the feed */
-  showLivestreamsAtTop?: boolean;
+
   /** Per-list view options (duration filter etc.) */
   viewOptions?: ListViewOptions;
   /** Optional community moderation controls. */
@@ -99,7 +81,7 @@ export function FeedView({
   hasNextPage,
   isFetchingNextPage,
   fetchNextPage,
-  showLivestreamsAtTop = false,
+
   viewOptions,
   moderation,
   emptyMessage,
@@ -157,22 +139,7 @@ export function FeedView({
     });
   }
 
-  // When showLivestreamsAtTop is enabled, livestreams with working RTMP feeds are sorted to the front
-  // They remain in the same grid/list, just ordered first
-  const processedEvents = showLivestreamsAtTop
-    ? [...filtered].sort((a, b) => {
-        const aIsPinnedLivestream = isLivestream(a) && getLivestreamStatus(a) === 'live' && hasWorkingStreamFeed(a);
-        const bIsPinnedLivestream = isLivestream(b) && getLivestreamStatus(b) === 'live' && hasWorkingStreamFeed(b);
-        // Both are pinned livestreams - maintain original order by timestamp
-        if (aIsPinnedLivestream && bIsPinnedLivestream) return 0;
-        // Only a is pinned - put a first
-        if (aIsPinnedLivestream) return -1;
-        // Only b is pinned - put b first
-        if (bIsPinnedLivestream) return 1;
-        // Neither is pinned - maintain original order
-        return 0;
-      })
-    : filtered;
+  const processedEvents = filtered;
 
   const isPaginated = !!fetchNextPage;
   const sentinelVariant = mode === 'media' ? 'grid' : mode === 'audio' ? 'audio' : 'list';
@@ -193,7 +160,7 @@ export function FeedView({
 
   return (
     <div>
-      {/* All content in one grid/list - livestreams sorted to front when toggle is on */}
+       {/* All content in one grid/list */}
       {mode === 'media' && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 p-4">
           {processedEvents.map((event) => {
