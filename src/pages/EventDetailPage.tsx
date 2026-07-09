@@ -1,5 +1,6 @@
 import { useSeoMeta } from '@unhead/react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { ArrowLeft, MessageCircle, Repeat2, CheckCircle } from 'lucide-react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
@@ -24,6 +25,8 @@ import {
   relativeTime,
   isLongform,
   isReply,
+  isLivestream,
+  getLivestreamInfo,
   getParentEventId,
   eventToNevent,
   tryExtractEmbeddedEvent,
@@ -99,6 +102,24 @@ function EventDetailBody({ event, wrapper }: { event: NostrEvent; wrapper?: Nost
   const title = getEventTitle(event);
   const cover = getCoverImage(event);
   const summary = getSummary(event);
+
+  // Redirect to naddr for livestream events
+  const isLive = isLivestream(event);
+  const livestreamInfo = isLive ? getLivestreamInfo(event) : null;
+  const livestreamNaddr = livestreamInfo?.dTag
+    ? nip19.naddrEncode({ kind: 30311, pubkey: event.pubkey, identifier: livestreamInfo.dTag })
+    : null;
+
+  // Perform redirect for livestreams
+  if (isLive && livestreamNaddr) {
+    navigate(`/${livestreamNaddr}`, { replace: true });
+    // Show minimal content while redirecting
+    return (
+      <div className="px-4 py-5 border-b border-border">
+        <p className="text-sm text-muted-foreground">Redirecting to livestream page...</p>
+      </div>
+    );
+  }
 
   const reply = isReply(event);
   const parentRef = reply ? getParentEventId(event) : null;

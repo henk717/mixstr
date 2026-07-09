@@ -119,15 +119,16 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
         className="px-4 py-3 hover:bg-accent/30 transition-colors cursor-pointer"
         onClick={handleCardClick}
       >
-        {isRss ? (
-          <RssAuthorHeader event={displayEvent} compact />
-        ) : (
-          <PostAuthor
-            pubkey={displayEvent.pubkey}
-            createdAt={displayEvent.created_at}
-            compact
-          />
-        )}
+{isRss ? (
+  <RssAuthorHeader event={displayEvent} compact />
+) : (
+  <PostAuthor
+    pubkey={displayEvent.pubkey}
+    createdAt={displayEvent.created_at}
+    compact
+    hostPubkey={isLivestream(displayEvent) ? livestreamInfo?.hostPubkey : undefined}
+  />
+)}
 
         <div className="mt-1.5 pl-11">
           {longform ? (

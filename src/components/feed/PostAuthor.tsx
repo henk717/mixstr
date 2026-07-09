@@ -9,16 +9,20 @@ interface PostAuthorProps {
   pubkey: string;
   createdAt: number;
   compact?: boolean;
+  /** Optional host pubkey for livestreams (shows actual streamer instead of event author) */
+  hostPubkey?: string;
 }
 
-export function PostAuthor({ pubkey, createdAt, compact }: PostAuthorProps) {
-  const author = useAuthor(pubkey);
+export function PostAuthor({ pubkey, createdAt, compact, hostPubkey }: PostAuthorProps) {
+  // Use host pubkey for livestreams, otherwise use event pubkey
+  const displayPubkey = hostPubkey ?? pubkey;
+  const author = useAuthor(displayPubkey);
   const meta = author.data?.metadata;
   const authorEvent = author.data?.event;
-  const npub = nip19.npubEncode(pubkey);
+  const npub = nip19.npubEncode(displayPubkey);
   const rawName = meta?.display_name || meta?.name || '';
-  const displayName = rawName.trim() || pubkey.slice(0, 10) + '…';
-  const avatarInitial = displayName[0]?.toUpperCase() || pubkey.slice(0, 1).toUpperCase();
+  const displayName = rawName.trim() || displayPubkey.slice(0, 10) + '…';
+  const avatarInitial = displayName[0]?.toUpperCase() || displayPubkey.slice(0, 1).toUpperCase();
 
   if (compact) {
     return (

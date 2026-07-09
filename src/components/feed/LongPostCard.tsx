@@ -149,7 +149,11 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
         {isRss ? (
           <RssAuthorHeader event={displayEvent} />
         ) : (
-          <PostAuthor pubkey={displayEvent.pubkey} createdAt={displayEvent.created_at} />
+          <PostAuthor
+            pubkey={displayEvent.pubkey}
+            createdAt={displayEvent.created_at}
+            hostPubkey={isLivestream(displayEvent) ? livestreamInfo?.hostPubkey : undefined}
+          />
         )}
 
         <div className="mt-3 space-y-3">
