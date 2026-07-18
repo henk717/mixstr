@@ -37,9 +37,14 @@ export function extractVideos(event: NostrEvent): string[] {
   for (const tag of event.tags) {
     if (tag[0] === 'imeta') {
       const urlEntry = tag.find((v) => v.startsWith('url '));
+      const mimeEntry = tag.find((v) => v.startsWith('m '));
       if (urlEntry) {
         const u = urlEntry.slice(4);
-        if (/\.(mp4|webm|mov|avi|mkv)/i.test(u)) urls.push(u);
+        const mime = mimeEntry?.slice(2).toLowerCase() ?? '';
+        // Check MIME type or URL extension
+        if (mime.startsWith('video/') || /\.(mp4|webm|mov|avi|mkv)/i.test(u)) {
+          if (!urls.includes(u)) urls.push(u);
+        }
       }
     }
     if (tag[0] === 'url' && /\.(mp4|webm|mov|avi|mkv)/i.test(tag[1])) {
@@ -67,9 +72,14 @@ export function extractAudio(event: NostrEvent): string[] {
   for (const tag of event.tags) {
     if (tag[0] === 'imeta') {
       const urlEntry = tag.find((v) => v.startsWith('url '));
+      const mimeEntry = tag.find((v) => v.startsWith('m '));
       if (urlEntry) {
         const u = urlEntry.slice(4);
-        if (/\.(mp3|ogg|wav|flac|aac|opus|m4a)/i.test(u)) urls.push(u);
+        const mime = mimeEntry?.slice(2).toLowerCase() ?? '';
+        // Check MIME type or URL extension
+        if (mime.startsWith('audio/') || /\.(mp3|ogg|wav|flac|aac|opus|m4a)/i.test(u)) {
+          if (!urls.includes(u)) urls.push(u);
+        }
       }
     }
     if (tag[0] === 'url' && /\.(mp3|ogg|wav|flac|aac|opus|m4a)/i.test(tag[1])) {

@@ -15,7 +15,7 @@ import {
 import { useMixstr } from '@/hooks/useMixstr';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
-import { eventToNevent, extractVideos } from '@/lib/postUtils';
+import { eventToNevent, extractVideos, extractAudio } from '@/lib/postUtils';
 
 function formatTime(seconds: number): string {
   if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
@@ -100,7 +100,14 @@ export function AudioPlayerBar() {
   const handleArtClick = () => {
     // Navigate to the dedicated media player page with media URL and destination
     const params = new URLSearchParams();
-    params.set('media', currentTrack.url);
+    
+    // Prefer video URL if available, otherwise use audio URL
+    const videos = extractVideos(currentTrack.event);
+    const audios = extractAudio(currentTrack.event);
+    const mediaUrl = videos.length > 0 ? videos[0] : currentTrack.url;
+    
+    params.set('media', mediaUrl);
+    params.set('title', currentTrack.title);
     
     // Check if it's an RSS event and get the destination link
     const rssLink = currentTrack.event.tags.find(([k]) => k === 'link')?.[1];

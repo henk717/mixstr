@@ -11,6 +11,8 @@ import {
   relativeTime,
   getAudioTrackInfo,
   eventToNevent,
+  extractVideos,
+  extractAudio,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useMixstr } from '@/hooks/useMixstr';
@@ -80,7 +82,14 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
   // Clicking the row opens the dedicated media player page with media URL and destination
   const handleRowClick = () => {
     const params = new URLSearchParams();
-    params.set('media', trackInfo.url);
+    
+    // Prefer video URL if available, otherwise use audio URL
+    const videos = extractVideos(displayEvent);
+    const audios = extractAudio(displayEvent);
+    const mediaUrl = videos.length > 0 ? videos[0] : trackInfo.url;
+    
+    params.set('media', mediaUrl);
+    params.set('title', track.title);
     if (rssLink) {
       params.set('dest', rssLink);
     }

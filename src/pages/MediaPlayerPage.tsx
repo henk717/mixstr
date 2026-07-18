@@ -40,11 +40,12 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
   const { nostr } = useNostr();
 
   // Support two modes:
-  // 1. Direct media URL via query params: /player?media=...&dest=...
+  // 1. Direct media URL via query params: /player?media=...&dest=...&title=...
   // 2. nevent/note ID via path param: /player/nevent1...
   
   const mediaUrlFromQuery = searchParams.get('media');
   const destUrlFromQuery = searchParams.get('dest');
+  const titleFromQuery = searchParams.get('title');
   const hasQueryParams = !!mediaUrlFromQuery;
 
   // Decode the nevent or note parameter (fallback mode)
@@ -84,7 +85,7 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
     : isVideoFromEvent;
   const coverImage = hasQueryParams ? undefined : coverImageFromEvent;
   const title = hasQueryParams 
-    ? new URL(mediaUrlFromQuery!).pathname.split('/').pop() || 'Media Player'
+    ? (titleFromQuery || new URL(mediaUrlFromQuery!).pathname.split('/').pop() || 'Media Player')
     : titleFromEvent;
   
   // Use destination URL for comments if provided, otherwise use RSS link from event
@@ -94,7 +95,7 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
 
   // For display purposes
   const displayTitle = hasQueryParams 
-    ? (new URL(mediaUrlFromQuery!).hostname || 'Media')
+    ? (titleFromQuery || new URL(mediaUrlFromQuery!).hostname || 'Media')
     : (titleFromEvent ?? displayEvent?.content.slice(0, 50));
 
   useSeoMeta({
