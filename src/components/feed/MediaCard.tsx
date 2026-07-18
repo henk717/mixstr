@@ -8,6 +8,7 @@ import { RepostBanner } from './RepostBanner';
 import {
   extractImages,
   extractVideos,
+  extractAudio,
   extractExternalEmbeds,
   getEventTitle,
   isLivestream,
@@ -45,13 +46,14 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
 
   const { addToQueue } = useMixstr();
 
-  const images = extractImages(displayEvent);
-  const videos = extractVideos(displayEvent);
-  const embeds = extractExternalEmbeds(displayEvent);
-  const livestream = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
-  const isVideo = videos.length > 0;
-  const isEmbed = embeds.length > 0 && !isVideo;
-  const embed = embeds[0];
+   const images = extractImages(displayEvent);
+   const videos = extractVideos(displayEvent);
+   const audios = extractAudio(displayEvent);
+   const embeds = extractExternalEmbeds(displayEvent);
+   const livestream = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
+   const isVideo = videos.length > 0;
+   const isEmbed = embeds.length > 0 && !isVideo;
+   const embed = embeds[0];
 
   // For livestreams, use the host pubkey (actual streamer) instead of event author
   const hostPubkey = livestream?.hostPubkey ?? displayEvent.pubkey;
@@ -80,14 +82,31 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   // Nothing displayable
   if (!thumbnail && !isVideo && !isEmbed && !livestream) return null;
 
-  const handleCardClick = () => {
-    if (rssLink) {
-      window.open(rssLink, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    // Use naddr for livestreams, nevent for everything else
-    navigate(`/${livestream ? naddr : nevent}`);
-  };
+   const handleCardClick = () => {
+     // For RSS events with video/audio, navigate to the new player
+     if (isRss && (videos.length > 0 || audios.length > 0)) {
+       const params = new URLSearchParams();
+       const mediaUrl = videos.length > 0 ? videos[0] : audios[0];
+       const isVideo = videos.length > 0;
+       params.set('media', mediaUrl);
+       params.set('title', title);
+       params.set('type', isVideo ? 'video' : 'audio');
+       if (rssLink) {
+         params.set('dest', rssLink);
+       }
+       navigate(`/player?${params.toString()}`);
+       return;
+     }
+     
+     // For RSS events without media (images only), open the external link
+     if (rssLink) {
+       window.open(rssLink, '_blank', 'noopener,noreferrer');
+       return;
+     }
+     
+     // Use naddr for livestreams, nevent for everything else
+     navigate(`/${livestream ? naddr : nevent}`);
+   };
 
   const handleAddToQueue = (e: React.MouseEvent) => {
     e.stopPropagation();

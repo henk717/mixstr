@@ -46,6 +46,7 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
   const mediaUrlFromQuery = searchParams.get('media');
   const destUrlFromQuery = searchParams.get('dest');
   const titleFromQuery = searchParams.get('title');
+  const typeFromQuery = searchParams.get('type');
   const hasQueryParams = !!mediaUrlFromQuery;
 
   // Decode the nevent or note parameter (fallback mode)
@@ -81,7 +82,7 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
   // Use query params if available, otherwise fall back to event data
   const mediaUrl = mediaUrlFromQuery || mediaUrlFromEvent;
   const isVideo = hasQueryParams 
-    ? /\.(mp4|webm|mov|mkv)/i.test(mediaUrlFromQuery!)
+    ? typeFromQuery === 'audio' ? false : true  // Default to video if type not specified
     : isVideoFromEvent;
   const coverImage = hasQueryParams ? undefined : coverImageFromEvent;
   const title = hasQueryParams 
@@ -139,14 +140,32 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
             coverImage={coverImage}
           />
 
-           {/* Video Info */}
-           <Card>
-             <CardContent className="p-4 space-y-4">
-               <div>
-                 <h1 className="text-xl font-bold text-foreground line-clamp-2">
-                   {title}
-                 </h1>
-               </div>
+            {/* Video Info */}
+            <Card>
+              <CardContent className="p-4 space-y-4">
+                <div className="flex items-start justify-between gap-3">
+                  <h1 className="text-xl font-bold text-foreground line-clamp-2 flex-1">
+                    {title}
+                  </h1>
+                  {/* External link button */}
+                  {(destUrlFromQuery || rssInfoFromEvent?.link) && (
+                    <a
+                      href={destUrlFromQuery || rssInfoFromEvent?.link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-shrink-0"
+                      title="Open on external site"
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                      >
+                        <ExternalLink size={16} />
+                      </Button>
+                    </a>
+                  )}
+                </div>
 
                {/* Author/Source Info */}
                <div className="flex items-center justify-between pt-2 border-t border-border">
@@ -304,19 +323,71 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
+  const [hlsLoaded, setHlsLoaded] = useState(false);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
   const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(isVideo ? url : undefined);
+  const isHls = url?.endsWith('.m3u8') || /m3u8/i.test(url);
+
+  // Load hls.js script if needed
+  useEffect(() => {
+    if (isHls && !hlsLoaded) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
+      script.onload = () => setHlsLoaded(true);
+      document.body.appendChild(script);
+      return () => {
+        document.body.removeChild(script);
+      };
+    }
+  }, [isHls, hlsLoaded]);
 
   useEffect(() => {
     const media = mediaRef.current;
     if (!media) return;
 
-    const handleTimeUpdate = () => {
-      setProgress(media.currentTime / media.duration || 0);
+    // Initialize HLS.js for HLS streams
+    let hls: any = null;
+    if (isHls && isVideo && hlsLoaded && 'Hls' in window) {
+      const Hls = (window as any).Hls;
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+        });
+        
+        hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+          if (isFinite(data.duration) && data.duration > 0) {
+            setDuration(data.duration);
+          }
+        });
+        
+        hls.on(Hls.Events.LEVEL_UPDATED, (event, data) => {
+          if (data.details?.duration && data.details.duration > 0) {
+            setDuration(data.details.duration);
+          }
+        });
+        
+        hls.loadSource(url);
+        hls.attachMedia(media as HTMLVideoElement);
+      }
+    }
+
+    const updateDuration = () => {
+      if (isFinite(media.duration) && media.duration > 0 && media.duration !== Infinity) {
+        // Only update if duration changed significantly (more than 1 second)
+        setDuration((prev) => {
+          if (Math.abs(media.duration - prev) > 1 || prev === 0) {
+            return media.duration;
+          }
+          return prev;
+        });
+      }
     };
 
-    const handleDurationChange = () => {
-      setDuration(media.duration);
+    const handleTimeUpdate = () => {
+      if (isFinite(media.duration) && media.duration > 0 && media.duration !== Infinity) {
+        setProgress((media.currentTime / media.duration) * 100);
+      }
     };
 
     const handleEnded = () => {
@@ -324,15 +395,26 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
     };
 
     media.addEventListener('timeupdate', handleTimeUpdate);
-    media.addEventListener('loadedmetadata', handleDurationChange);
+    media.addEventListener('durationchange', updateDuration);
+    media.addEventListener('loadedmetadata', updateDuration);
+    media.addEventListener('loadeddata', updateDuration);
+    media.addEventListener('canplay', updateDuration);
+    media.addEventListener('canplaythrough', updateDuration);
     media.addEventListener('ended', handleEnded);
 
     return () => {
       media.removeEventListener('timeupdate', handleTimeUpdate);
-      media.removeEventListener('loadedmetadata', handleDurationChange);
+      media.removeEventListener('durationchange', updateDuration);
+      media.removeEventListener('loadedmetadata', updateDuration);
+      media.removeEventListener('loadeddata', updateDuration);
+      media.removeEventListener('canplay', updateDuration);
+      media.removeEventListener('canplaythrough', updateDuration);
       media.removeEventListener('ended', handleEnded);
+      if (hls) {
+        hls.destroy();
+      }
     };
-  }, []);
+  }, [url, isHls, isVideo, hlsLoaded]);
 
   const togglePlay = () => {
     const media = mediaRef.current;
@@ -348,13 +430,13 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
 
   const handleSeek = (values: number[]) => {
     const media = mediaRef.current;
-    if (!media || !duration) return;
-    media.currentTime = (values[0] / 100) * duration;
-    setProgress(values[0] / 100);
+    if (!media || !isFinite(media.duration) || media.duration <= 0) return;
+    media.currentTime = (values[0] / 100) * media.duration;
+    setProgress(values[0]);
   };
 
   const formatTime = (seconds: number) => {
-    if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
+    if (!isFinite(seconds) || isNaN(seconds) || seconds <= 0) return '0:00';
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${m}:${s.toString().padStart(2, '0')}`;
@@ -415,7 +497,7 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 opacity-0 hover:opacity-100 transition-opacity">
           {/* Progress Bar */}
           <Slider
-            value={[progress * 100]}
+            value={[progress]}
             onValueChange={handleSeek}
             max={100}
             step={0.1}
@@ -436,7 +518,7 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
                 )}
               </button>
               <span className="text-white text-sm">
-                {formatTime(progress * duration)} / {formatTime(duration)}
+                {formatTime(mediaRef.current?.currentTime || 0)} / {isFinite(duration) && duration > 0 ? formatTime(duration) : '--:--'}
               </span>
             </div>
 
@@ -511,22 +593,36 @@ function UpNextList({ eventId }: { eventId: string }) {
     );
   }
 
-  return (
-    <div className="space-y-2">
-      {relatedEvents.map((event) => {
-        const videoUrl = extractVideos(event)[0] || extractAudio(event)[0];
-        const thumbnail = getCoverImage(event);
-        const videoTitle = getEventTitle(event) ?? event.content.slice(0, 50);
-        const isRss = isRssSyntheticEvent(event);
-        const rssInfo = getRssItemInfo(event);
-        const nevent = eventToNevent(event);
+   return (
+     <div className="space-y-2">
+       {relatedEvents.map((event) => {
+         const videos = extractVideos(event);
+         const audios = extractAudio(event);
+         const videoUrl = videos[0] || audios[0];
+         const thumbnail = getCoverImage(event);
+         const videoTitle = getEventTitle(event) ?? event.content.slice(0, 50);
+         const isRss = isRssSyntheticEvent(event);
+         const rssInfo = getRssItemInfo(event);
+         const rssLink = isRss ? event.tags.find(([k]) => k === 'link')?.[1] : undefined;
+         const isVideo = videos.length > 0;
 
-        return (
-          <Card
-            key={event.id}
-            className="cursor-pointer hover:bg-accent/50 transition-colors overflow-hidden"
-            onClick={() => navigate(`/player/${nevent}`)}
-          >
+         const handleCardClick = () => {
+           const params = new URLSearchParams();
+           params.set('media', videoUrl);
+           params.set('title', videoTitle);
+           params.set('type', isVideo ? 'video' : 'audio');
+           if (rssLink) {
+             params.set('dest', rssLink);
+           }
+           navigate(`/player?${params.toString()}`);
+         };
+
+         return (
+           <Card
+             key={event.id}
+             className="cursor-pointer hover:bg-accent/50 transition-colors overflow-hidden"
+             onClick={handleCardClick}
+           >
             <div className="relative aspect-video bg-black">
               {thumbnail ? (
                 <img

@@ -86,10 +86,12 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
     // Prefer video URL if available, otherwise use audio URL
     const videos = extractVideos(displayEvent);
     const audios = extractAudio(displayEvent);
-    const mediaUrl = videos.length > 0 ? videos[0] : trackInfo.url;
+    const mediaUrl = videos.length > 0 ? videos[0] : audios[0];
+    const isVideo = videos.length > 0;
     
     params.set('media', mediaUrl);
     params.set('title', track.title);
+    params.set('type', isVideo ? 'video' : 'audio');
     if (rssLink) {
       params.set('dest', rssLink);
     }
