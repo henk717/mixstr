@@ -99,7 +99,7 @@ export function AppRouter() {
 
         {/* Dedicated media player page */}
         <Route
-          path="/player/:id"
+          path="/player/:id?"
           element={
             <MainLayout>
               <MediaPlayerPage />

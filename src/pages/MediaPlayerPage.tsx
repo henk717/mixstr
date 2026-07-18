@@ -271,11 +271,11 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
            </div>
         </div>
 
-        {/* Sidebar - Up Next */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold">Up Next</h3>
-          <UpNextList eventId={displayEvent.id} />
-        </div>
+         {/* Sidebar - Up Next */}
+         <div className="space-y-4">
+           <h3 className="text-sm font-semibold">Up Next</h3>
+           <UpNextList eventId={displayEvent?.id || mediaUrl} />
+         </div>
       </div>
     </div>
   );
