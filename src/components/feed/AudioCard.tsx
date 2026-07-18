@@ -77,13 +77,14 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
     addToQueue(track);
   };
 
-  // Clicking the row opens the original RSS article or the event detail page
+  // Clicking the row opens the dedicated media player page with media URL and destination
   const handleRowClick = () => {
+    const params = new URLSearchParams();
+    params.set('media', trackInfo.url);
     if (rssLink) {
-      window.open(rssLink, '_blank', 'noopener,noreferrer');
-      return;
+      params.set('dest', rssLink);
     }
-    navigate(`/${nevent}`);
+    navigate(`/player?${params.toString()}`);
   };
 
   return (

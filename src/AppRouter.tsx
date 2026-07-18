@@ -11,6 +11,7 @@ import { ListFeedPage } from "./pages/ListFeedPage";
 import { CommunityPage } from "./pages/CommunityPage";
 import { HashtagFeedPage } from "./pages/HashtagFeedPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { MediaPlayerPage } from "./pages/MediaPlayerPage";
 import { MainLayout } from "./components/layout/MainLayout";
 
 export function AppRouter() {
@@ -92,6 +93,16 @@ export function AppRouter() {
           element={
             <MainLayout>
               <SettingsPage />
+            </MainLayout>
+          }
+        />
+
+        {/* Dedicated media player page */}
+        <Route
+          path="/player/:id"
+          element={
+            <MainLayout>
+              <MediaPlayerPage />
             </MainLayout>
           }
         />

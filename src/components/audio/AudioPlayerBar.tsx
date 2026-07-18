@@ -98,9 +98,17 @@ export function AudioPlayerBar() {
   };
 
   const handleArtClick = () => {
-    // Navigate to the event's detail page
-    const nevent = eventToNevent(currentTrack.event);
-    navigate(`/${nevent}`);
+    // Navigate to the dedicated media player page with media URL and destination
+    const params = new URLSearchParams();
+    params.set('media', currentTrack.url);
+    
+    // Check if it's an RSS event and get the destination link
+    const rssLink = currentTrack.event.tags.find(([k]) => k === 'link')?.[1];
+    if (rssLink) {
+      params.set('dest', rssLink);
+    }
+    
+    navigate(`/player?${params.toString()}`);
   };
 
   return (
@@ -174,7 +182,7 @@ export function AudioPlayerBar() {
           <div
             className="relative w-12 h-12 rounded-lg overflow-hidden bg-muted flex-shrink-0 cursor-pointer group/art"
             onClick={handleArtClick}
-            title="Open post"
+            title="Open in player"
           >
             {isVideo ? (
               /* For video tracks: show a still frame from the video */
