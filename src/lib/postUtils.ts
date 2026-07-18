@@ -371,14 +371,16 @@ export function livestreamToNaddr(event: NostrEvent): string {
   }
 }
 
-/** Check if event has displayable media (images or videos) */
+/** Check if event has displayable media (images, videos, or audio) */
 export function hasMedia(event: NostrEvent): boolean {
   return (
     extractImages(event).length > 0 ||
     extractVideos(event).length > 0 ||
+    extractAudio(event).length > 0 ||
     extractExternalEmbeds(event).length > 0 ||
-    event.kind === 20 ||   // NIP-68 picture
-    event.kind === 34235   // NIP-71 video
+    event.kind === 20 ||    // NIP-68 picture
+    event.kind === 34235 || // NIP-71 video
+    event.kind === 34236    // NIP-71 audio
   );
 }
 
