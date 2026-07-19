@@ -228,14 +228,14 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
                   <ChevronDown size={14} /> Show more
                 </button>
               )}
-              {isVeryLong && !hasAnyMedia && textExpanded && (
-                <button
-                  className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
-                  onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
-                >
-                  <ChevronUp size={14} /> Show less
-                </button>
-              )}
+               {isVeryLong && !eventHasMedia(displayEvent) && textExpanded && (
+                 <button
+                   className="text-xs text-muted-foreground flex items-center gap-1 hover:underline"
+                   onClick={(e) => { e.stopPropagation(); setTextExpanded(false); }}
+                 >
+                   <ChevronUp size={14} /> Show less
+                 </button>
+               )}
 
                {/* ── Embedded livestream preview (if this is a livestream event) ── */}
               {livestreamNaddr && (

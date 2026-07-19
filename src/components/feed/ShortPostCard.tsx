@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { ChevronDown, ChevronUp, Play, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronUp, Play, ExternalLink, Music } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { nip19 } from 'nostr-tools';
 import { PostAuthor } from './PostAuthor';
@@ -15,9 +15,14 @@ import { EmbeddedNaddr } from '@/components/EmbeddedNaddr';
 import { Button } from '@/components/ui/button';
 import { ReplyingToChip } from './ReplyContext';
 import { VideoWithVisibility } from '@/components/VideoWithVisibility';
+import { AudioVisualizer } from '@/components/AudioVisualizer';
+import { useAuthor } from '@/hooks/useAuthor';
+import { getDisplayName } from '@/lib/getDisplayName';
+import { getAvatarShape } from '@/lib/avatarShape';
 import {
   extractImages,
   extractVideos,
+  extractAudio,
   extractExternalEmbeds,
   getEventTitle,
   getCoverImage,
@@ -51,11 +56,12 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   // Resolve repost/community-approval wrappers to the original event.
   const { event: displayEvent, wrapper } = useResolvedEvent(event);
 
-  const isLong = displayEvent.content.length > 280;
-  const images = extractImages(displayEvent);
-  const videos = extractVideos(displayEvent);
-  const embeds = extractExternalEmbeds(displayEvent);
-  const reply = isReply(displayEvent);
+   const isLong = displayEvent.content.length > 280;
+   const images = extractImages(displayEvent);
+   const videos = extractVideos(displayEvent);
+   const audios = extractAudio(displayEvent);
+   const embeds = extractExternalEmbeds(displayEvent);
+   const reply = isReply(displayEvent);
   const longform = isLongform(displayEvent);
   const title = getEventTitle(displayEvent);
   const cover = getCoverImage(displayEvent);
@@ -69,7 +75,12 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
   const parentRef = reply ? getParentEventId(displayEvent) : null;
   const { data: parentEvent, isPending: parentPending } = useParentEvent(parentRef);
 
-  const hasMedia = images.length > 0 || videos.length > 0 || embeds.length > 0;
+   const hasMedia = images.length > 0 || videos.length > 0 || audios.length > 0 || embeds.length > 0;
+
+   // Get author metadata for audio visualizer
+   const author = useAuthor(audios.length > 0 ? displayEvent.pubkey : undefined);
+   const authorMetadata = author.data?.metadata;
+   const authorDisplayName = authorMetadata ? getDisplayName(authorMetadata, displayEvent.pubkey) : '';
 
   // Check if this is a livestream event and extract naddr coordinates
   const livestreamInfo = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
@@ -90,13 +101,14 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
     navigate(`/${livestreamNaddr ? nip19.naddrEncode(livestreamNaddr) : nevent}`);
   };
 
-  // Build a compact media hint label e.g. "2 images · 1 video"
-  const mediaParts: string[] = [];
-  if (images.length > 0) mediaParts.push(`${images.length} image${images.length > 1 ? 's' : ''}`);
-  if (videos.length > 0) mediaParts.push(`${videos.length} video${videos.length > 1 ? 's' : ''}`);
-  if (embeds.length > 0 && videos.length === 0 && images.length === 0)
-    mediaParts.push(embeds[0].label);
-  const mediaHint = mediaParts.join(' · ');
+   // Build a compact media hint label e.g. "2 images · 1 video"
+   const mediaParts: string[] = [];
+   if (images.length > 0) mediaParts.push(`${images.length} image${images.length > 1 ? 's' : ''}`);
+   if (videos.length > 0) mediaParts.push(`${videos.length} video${videos.length > 1 ? 's' : ''}`);
+   if (audios.length > 0) mediaParts.push(`${audios.length} audio${audios.length > 1 ? 's' : ''}`);
+   if (embeds.length > 0 && videos.length === 0 && images.length === 0 && audios.length === 0)
+     mediaParts.push(embeds[0].label);
+   const mediaHint = mediaParts.join(' · ');
 
   return (
     <article className="border-b border-border">
@@ -217,13 +229,24 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
                 <>
                   {images.length > 0 && <FeedImageGallery images={images} />}
 
-                  {videos.length > 0 && (
-                    <div className="mt-1 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                      <VideoWithVisibility src={videos[0]} className="max-h-72" />
-                    </div>
-                  )}
+                   {videos.length > 0 && (
+                     <div className="mt-1 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                       <VideoWithVisibility src={videos[0]} className="max-h-72" />
+                     </div>
+                   )}
 
-                  {embeds.length > 0 && videos.length === 0 && images.length === 0 && (
+                   {audios.length > 0 && (
+                     <div className="mt-1" onClick={(e) => e.stopPropagation()}>
+                       <AudioVisualizer
+                         src={audios[0]}
+                         avatarUrl={authorMetadata?.picture}
+                         avatarFallback={authorDisplayName[0]?.toUpperCase() ?? '?'}
+                         avatarShape={getAvatarShape(authorMetadata)}
+                       />
+                     </div>
+                   )}
+
+                   {embeds.length > 0 && videos.length === 0 && images.length === 0 && audios.length === 0 && (
                     <div
                       className="mt-1 rounded-xl overflow-hidden border border-border aspect-video"
                       onClick={(e) => e.stopPropagation()}
@@ -263,12 +286,17 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
                         <img src={url} alt="" className="w-full h-full object-cover" loading="lazy" />
                       </div>
                     ))}
-                    {videos.length > 0 && images.length === 0 && (
-                      <div className="w-7 h-7 rounded-md bg-muted border-2 border-background flex items-center justify-center flex-shrink-0">
-                        <Play size={10} className="text-muted-foreground" />
-                      </div>
-                    )}
-                    {embeds.length > 0 && images.length === 0 && videos.length === 0 && (
+                     {videos.length > 0 && images.length === 0 && (
+                       <div className="w-7 h-7 rounded-md bg-muted border-2 border-background flex items-center justify-center flex-shrink-0">
+                         <Play size={10} className="text-muted-foreground" />
+                       </div>
+                     )}
+                     {audios.length > 0 && images.length === 0 && videos.length === 0 && (
+                       <div className="w-7 h-7 rounded-md bg-muted border-2 border-background flex items-center justify-center flex-shrink-0">
+                         <Music size={10} className="text-muted-foreground" />
+                       </div>
+                     )}
+                     {embeds.length > 0 && images.length === 0 && videos.length === 0 && audios.length === 0 && (
                       <div className="w-7 h-7 rounded-md bg-muted border-2 border-background flex items-center justify-center flex-shrink-0">
                         <ExternalLink size={10} className="text-muted-foreground" />
                       </div>
