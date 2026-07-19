@@ -8,7 +8,7 @@ const PAGE_SIZE = 250;
 /** Per-relay query timeout. Slow/stuck relays get marked done quickly. */
 const QUERY_TIMEOUT = 4_000;
 /** How often to re-probe relays once we think history is exhausted. */
-const HISTORY_REPROBE_INTERVAL = 30_000;
+const HISTORY_REPROBE_INTERVAL = 5_000;
 
 interface RelayCursor {
   oldest?: number;
