@@ -15,9 +15,13 @@ import { EmbeddedNaddr } from '@/components/EmbeddedNaddr';
 import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
 import { RepostBanner } from './RepostBanner';
 import { VideoWithVisibility } from '@/components/VideoWithVisibility';
+import { AudioVisualizer } from '@/components/AudioVisualizer';
+import { getDisplayName } from '@/lib/getDisplayName';
+import { getAvatarShape } from '@/lib/avatarShape';
 import {
   extractImages,
   extractVideos,
+  extractAudio,
   getEventTitle,
   getCoverImage,
   getSummary,
@@ -88,7 +92,13 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
 
   const images = extractImages(displayEvent);
   const videos = extractVideos(displayEvent);
-  const hasAnyMedia = eventHasMedia(displayEvent) || images.length > 0 || videos.length > 0;
+  const audios = extractAudio(displayEvent);
+  const hasAnyMedia = eventHasMedia(displayEvent) || images.length > 0 || videos.length > 0 || audios.length > 0;
+
+  // Get author metadata for audio visualizer
+  const author = useAuthor(displayEvent.pubkey);
+  const authorMetadata = author.data?.metadata;
+  const authorDisplayName = authorMetadata ? getDisplayName(authorMetadata, displayEvent.pubkey) : '';
 
   // Check if this is a livestream event and extract naddr coordinates
   const livestreamInfo = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
@@ -253,14 +263,26 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
               {/* ── Images ── */}
               {images.length > 0 && <FeedImageGallery images={images} />}
 
-{/* ── Videos ── */}
-{videos.length > 0 && (
-  <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-    <VideoWithVisibility src={videos[0]} />
-  </div>
-)}
+ {/* ── Videos ── */}
+ {videos.length > 0 && (
+   <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+     <VideoWithVisibility src={videos[0]} />
+   </div>
+ )}
 
-              {/* ── Embedded livestream preview (if this is a livestream event) ── */}
+               {/* ── Audio ── */}
+               {audios.length > 0 && (
+                 <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                   <AudioVisualizer
+                     src={audios[0]}
+                     avatarUrl={authorMetadata?.picture}
+                     avatarFallback={authorDisplayName[0]?.toUpperCase() ?? '?'}
+                     avatarShape={getAvatarShape(authorMetadata)}
+                   />
+                 </div>
+               )}
+
+               {/* ── Embedded livestream preview (if this is a livestream event) ── */}
               {livestreamNaddr && (
                 <div className="mt-3" onClick={(e) => e.stopPropagation()}>
                   <EmbeddedNaddr addr={livestreamNaddr} className="my-2.5" />
