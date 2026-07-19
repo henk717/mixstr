@@ -13,6 +13,8 @@ interface ImageGalleryProps {
   onLightboxOpen?: (index: number) => void;
   onLightboxClose?: () => void;
   className?: string;
+  /** When true, the grid will auto-size to fit all visible images without a max height constraint. */
+  autoSize?: boolean;
 }
 
 /**
@@ -30,12 +32,19 @@ export function ImageGallery({
   onLightboxOpen,
   onLightboxClose,
   className,
+  autoSize = false,
 }: ImageGalleryProps) {
   const shown = images.slice(0, maxVisible);
   const extra = Math.max(0, images.length - maxVisible);
 
   // Two-column grid for 2+ images
   const gridCols = shown.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
+
+  // Calculate rows needed for the grid
+  const rows = Math.ceil(shown.length / 2);
+  // Each row is approximately 160px (aspect-video on 320px wide images) + 8px gap
+  const estimatedRowHeight = 168;
+  const calculatedHeight = rows * estimatedRowHeight;
 
   return (
     <>
@@ -45,7 +54,7 @@ export function ImageGallery({
           gridCols,
           className,
         )}
-        style={maxGridHeight ? { maxHeight: maxGridHeight } : undefined}
+        style={autoSize ? { height: calculatedHeight } : maxGridHeight ? { maxHeight: maxGridHeight } : undefined}
       >
         {shown.map((url, idx) => (
           <button

@@ -652,29 +652,32 @@ export function NoteContent({
             );
           }
           case 'image-gallery': {
-            if (disableEmbeds || disableMediaEmbeds) {
-              return <span key={i}>{token.urls.map(() => '\n').join('')}</span>;
-            }
-            const galleryStartIndex = tokenImageIndex.get(i) ?? 0;
-            const galleryLightboxIndex =
-              lightboxIndex !== null &&
-              lightboxIndex >= galleryStartIndex &&
-              lightboxIndex < galleryStartIndex + token.urls.length
-                ? lightboxIndex - galleryStartIndex
-                : null;
-            return (
-              <ImageGallery
-                key={i}
-                images={token.urls}
-                maxVisible={4}
-                maxGridHeight="480px"
-                imetaMap={imetaMap}
-                lightboxIndex={galleryLightboxIndex}
-                onLightboxOpen={(idx) => { setLightboxIndex(galleryStartIndex + idx); }}
-                onLightboxClose={closeLightbox}
-              />
-            );
-          }
+             if (disableEmbeds || disableMediaEmbeds) {
+               return <span key={i}>{token.urls.map(() => '\n').join('')}</span>;
+             }
+             const galleryStartIndex = tokenImageIndex.get(i) ?? 0;
+             const galleryLightboxIndex =
+               lightboxIndex !== null &&
+               lightboxIndex >= galleryStartIndex &&
+               lightboxIndex < galleryStartIndex + token.urls.length
+                 ? lightboxIndex - galleryStartIndex
+                 : null;
+             // Kind 20 (NIP-68 picture posts) should auto-size to show all images
+             const isPicturePost = event.kind === 20;
+             return (
+               <ImageGallery
+                 key={i}
+                 images={token.urls}
+                 maxVisible={token.urls.length}
+                 maxGridHeight={isPicturePost ? undefined : "480px"}
+                 autoSize={isPicturePost}
+                 imetaMap={imetaMap}
+                 lightboxIndex={galleryLightboxIndex}
+                 onLightboxOpen={(idx) => { setLightboxIndex(galleryStartIndex + idx); }}
+                 onLightboxClose={closeLightbox}
+               />
+             );
+           }
           case 'link-embed':
             if (disableEmbeds) {
               return (

@@ -226,8 +226,9 @@ export function ShortPostCard({ event, moderation }: ShortPostCardProps) {
           {hasMedia && !longform && (
             <div className="mt-2">
               {mediaExpanded ? (
-                <>
-                  {images.length > 0 && <FeedImageGallery images={images} />}
+                 <>
+                   {/* Kind 20 (NIP-68 picture posts) should show all images without truncation */}
+                   {images.length > 0 && <FeedImageGallery images={images} maxVisible={images.length} autoSize={displayEvent.kind === 20} />}
 
                    {videos.length > 0 && (
                      <div className="mt-1 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
