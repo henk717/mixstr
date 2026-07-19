@@ -10,18 +10,12 @@ import { PostActions } from './PostActions';
 import { RssAuthorHeader } from './RssAuthorHeader';
 import { RssOpenRow } from './RssOpenRow';
 import { NoteContent } from '@/components/NoteContent';
-import { FeedImageGallery } from './FeedImageGallery';
+
 import { EmbeddedNaddr } from '@/components/EmbeddedNaddr';
 import { ReplyParentPreview, ReplyingToChip } from './ReplyContext';
 import { RepostBanner } from './RepostBanner';
-import { VideoWithVisibility } from '@/components/VideoWithVisibility';
-import { AudioVisualizer } from '@/components/AudioVisualizer';
-import { getDisplayName } from '@/lib/getDisplayName';
-import { getAvatarShape } from '@/lib/avatarShape';
+
 import {
-  extractImages,
-  extractVideos,
-  extractAudio,
   getEventTitle,
   getCoverImage,
   getSummary,
@@ -90,16 +84,6 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   const summary = getSummary(displayEvent);
   const isRss = isRssSyntheticEvent(displayEvent);
 
-  const images = extractImages(displayEvent);
-  const videos = extractVideos(displayEvent);
-  const audios = extractAudio(displayEvent);
-  const hasAnyMedia = eventHasMedia(displayEvent) || images.length > 0 || videos.length > 0 || audios.length > 0;
-
-  // Get author metadata for audio visualizer
-  const author = useAuthor(displayEvent.pubkey);
-  const authorMetadata = author.data?.metadata;
-  const authorDisplayName = authorMetadata ? getDisplayName(authorMetadata, displayEvent.pubkey) : '';
-
   // Check if this is a livestream event and extract naddr coordinates
   const livestreamInfo = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
   const livestreamNaddr: AddrCoords | null = livestreamInfo
@@ -113,7 +97,7 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
   // Only clamp text for extremely long text-only posts.
   // If the post has media, always show full text so context isn't cut off.
   const isVeryLong = displayEvent.content.length > TEXT_ONLY_CLAMP;
-  const shouldClampText = isVeryLong && !hasAnyMedia && !textExpanded;
+  const shouldClampText = isVeryLong && !eventHasMedia(displayEvent) && !textExpanded;
 
   const handleCardClick = () => {
     if (isRss) {
@@ -230,18 +214,11 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
           ) : (
             /* ── Regular post ── */
             <>
-              {/*
-                NoteContent renders the text plus any inline nostr mentions/hashtags.
-                Media (images, videos) are handled separately below so we can control
-                their layout precisely — pass disableMediaEmbeds so NoteContent doesn't
-                also try to render them, which would cause duplicates.
-              */}
-              <NoteContent
-                event={displayEvent}
-                className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
-                disableMediaEmbeds
-                inlineExternalEmbeds
-              />
+               <NoteContent
+                 event={displayEvent}
+                 className={cn('text-sm leading-relaxed', shouldClampText && 'line-clamp-8')}
+                 inlineExternalEmbeds
+               />
 
               {shouldClampText && (
                 <button
@@ -259,28 +236,6 @@ export function LongPostCard({ event, moderation }: LongPostCardProps) {
                   <ChevronUp size={14} /> Show less
                 </button>
               )}
-
-              {/* ── Images ── */}
-              {images.length > 0 && <FeedImageGallery images={images} />}
-
- {/* ── Videos ── */}
- {videos.length > 0 && (
-   <div className="rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-     <VideoWithVisibility src={videos[0]} />
-   </div>
- )}
-
-               {/* ── Audio ── */}
-               {audios.length > 0 && (
-                 <div className="mt-3" onClick={(e) => e.stopPropagation()}>
-                   <AudioVisualizer
-                     src={audios[0]}
-                     avatarUrl={authorMetadata?.picture}
-                     avatarFallback={authorDisplayName[0]?.toUpperCase() ?? '?'}
-                     avatarShape={getAvatarShape(authorMetadata)}
-                   />
-                 </div>
-               )}
 
                {/* ── Embedded livestream preview (if this is a livestream event) ── */}
               {livestreamNaddr && (
