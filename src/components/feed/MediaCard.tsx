@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { Play, Image, Plus, Wifi, Users, CheckCircle, Rss } from 'lucide-react';
+import { Play, Image, Plus, Wifi, Users, CheckCircle, Rss, Music } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import { Link } from 'react-router-dom';
@@ -46,14 +46,15 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
 
   const { addToQueue } = useMixstr();
 
-   const images = extractImages(displayEvent);
-   const videos = extractVideos(displayEvent);
-   const audios = extractAudio(displayEvent);
-   const embeds = extractExternalEmbeds(displayEvent);
-   const livestream = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
-   const isVideo = videos.length > 0;
-   const isEmbed = embeds.length > 0 && !isVideo;
-   const embed = embeds[0];
+    const images = extractImages(displayEvent);
+    const videos = extractVideos(displayEvent);
+    const audios = extractAudio(displayEvent);
+    const embeds = extractExternalEmbeds(displayEvent);
+    const livestream = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
+    const isVideo = videos.length > 0;
+    const isAudio = audios.length > 0 && !isVideo;
+    const isEmbed = embeds.length > 0 && !isVideo && !isAudio;
+    const embed = embeds[0];
 
   // For livestreams, use the host pubkey (actual streamer) instead of event author
   const hostPubkey = livestream?.hostPubkey ?? displayEvent.pubkey;
@@ -69,44 +70,45 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   const title = livestream?.title ?? (getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim());
   const livestreamThumbnail = livestream?.thumbnail ?? getCoverImage(displayEvent);
   
-  // Choose thumbnail: livestream first, then embed, then images, then video frame
-  const thumbnail = livestreamThumbnail ?? embed?.thumbnail ?? images[0];
-  const firstVideo = videos[0];
-  const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
-    !thumbnail && firstVideo ? firstVideo : undefined,
-  );
-  const displayThumbnail = thumbnail || videoFrame;
+   // Choose thumbnail: livestream first, then embed, then images, then video frame
+   const thumbnail = livestreamThumbnail ?? embed?.thumbnail ?? images[0];
+   const firstVideo = videos[0];
+   const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
+     !thumbnail && firstVideo ? firstVideo : undefined,
+   );
+   const displayThumbnail = thumbnail || videoFrame;
+   const isAudioOnly = isAudio && !displayThumbnail;
   const nevent = eventToNevent(displayEvent);
   const naddr = livestream ? livestreamToNaddr(displayEvent) : '';
 
-  // Nothing displayable
-  if (!thumbnail && !isVideo && !isEmbed && !livestream) return null;
+   // Nothing displayable
+   if (!thumbnail && !isVideo && !isAudio && !isEmbed && !livestream) return null;
 
-   const handleCardClick = () => {
-     // For RSS events with video/audio, navigate to the new player
-     if (isRss && (videos.length > 0 || audios.length > 0)) {
-       const params = new URLSearchParams();
-       const mediaUrl = videos.length > 0 ? videos[0] : audios[0];
-       const isVideo = videos.length > 0;
-       params.set('media', mediaUrl);
-       params.set('title', title);
-       params.set('type', isVideo ? 'video' : 'audio');
-       if (rssLink) {
-         params.set('dest', rssLink);
-       }
-       navigate(`/player?${params.toString()}`);
-       return;
-     }
-     
-     // For RSS events without media (images only), open the external link
-     if (rssLink) {
-       window.open(rssLink, '_blank', 'noopener,noreferrer');
-       return;
-     }
-     
-     // Use naddr for livestreams, nevent for everything else
-     navigate(`/${livestream ? naddr : nevent}`);
-   };
+    const handleCardClick = () => {
+      // For RSS events with video/audio, navigate to the new player
+      if (isRss && (videos.length > 0 || audios.length > 0)) {
+        const params = new URLSearchParams();
+        const mediaUrl = videos.length > 0 ? videos[0] : audios[0];
+        const isVideoType = videos.length > 0;
+        params.set('media', mediaUrl);
+        params.set('title', title);
+        params.set('type', isVideoType ? 'video' : 'audio');
+        if (rssLink) {
+          params.set('dest', rssLink);
+        }
+        navigate(`/player?${params.toString()}`);
+        return;
+      }
+      
+      // For RSS events without media (images only), open the external link
+      if (rssLink) {
+        window.open(rssLink, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      
+      // Use naddr for livestreams, nevent for everything else (including audio)
+      navigate(`/${livestream ? naddr : nevent}`);
+    };
 
   const handleAddToQueue = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -122,7 +124,7 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
     addToQueue(track);
   };
 
-  const hasQueueable = videos.length > 0;
+   const hasQueueable = videos.length > 0 || audios.length > 0;
 
   return (
     <div
@@ -134,31 +136,35 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
         <RepostBanner wrapper={wrapper} className="px-3 pt-2 pb-0" />
       )}
 
-      {/* Thumbnail area */}
-      <div className="relative aspect-video bg-black overflow-hidden">
-        {displayThumbnail ? (
-          <img
-            src={displayThumbnail}
-            alt={title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            loading="lazy"
-          />
-        ) : frameLoading ? (
-          <Skeleton className="absolute inset-0 w-full h-full" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-muted">
-            <Image size={32} className="text-muted-foreground" />
-          </div>
-        )}
+       {/* Thumbnail area */}
+       <div className="relative aspect-video bg-black overflow-hidden">
+         {displayThumbnail ? (
+           <img
+             src={displayThumbnail}
+             alt={title}
+             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+             loading="lazy"
+           />
+         ) : frameLoading ? (
+           <Skeleton className="absolute inset-0 w-full h-full" />
+         ) : isAudioOnly ? (
+           <div className="w-full h-full flex items-center justify-center bg-muted">
+             <Music size={32} className="text-muted-foreground" />
+           </div>
+         ) : (
+           <div className="w-full h-full flex items-center justify-center bg-muted">
+             <Image size={32} className="text-muted-foreground" />
+           </div>
+         )}
 
-        {/* Play overlay */}
-        {(isVideo || isEmbed) && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35 transition-colors">
-            <div className="w-12 h-12 rounded-full bg-black/70 flex items-center justify-center">
-              <Play size={20} className="text-white ml-0.5" fill="white" />
-            </div>
-          </div>
-        )}
+         {/* Play overlay */}
+         {(isVideo || isAudio || isEmbed) && (
+           <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35 transition-colors">
+             <div className="w-12 h-12 rounded-full bg-black/70 flex items-center justify-center">
+               <Play size={20} className="text-white ml-0.5" fill="white" />
+             </div>
+           </div>
+         )}
 
         {/* Live badge */}
         {livestream?.status === 'live' && (
@@ -174,22 +180,27 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
             {embed.type}
           </div>
         )}
-        {isVideo && !isEmbed && (
-          <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
-            video
-          </div>
-        )}
+         {isVideo && !isEmbed && !isAudio && (
+           <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
+             video
+           </div>
+         )}
+         {isAudio && !isEmbed && (
+           <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
+             audio
+           </div>
+         )}
 
-        {/* Add to queue button for videos */}
-        {hasQueueable && (
-          <button
-            onClick={handleAddToQueue}
-            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/70 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary"
-            title="Add to audio queue"
-          >
-            <Plus size={14} />
-          </button>
-        )}
+         {/* Add to queue button for videos and audio */}
+         {hasQueueable && (
+           <button
+             onClick={handleAddToQueue}
+             className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/70 flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary"
+             title="Add to audio queue"
+           >
+             <Plus size={14} />
+           </button>
+         )}
       </div>
 
       {/* Info row */}
