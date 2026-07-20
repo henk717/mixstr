@@ -623,24 +623,8 @@ function CorsSettings() {
       return;
     }
 
-    // Ensure primary has the placeholder (but don't add it if already present)
-    const primaryWithPlaceholder = primary.includes('{url}') 
-      ? primary 
-      : primary.endsWith('{url}')
-        ? primary
-        : primary.endsWith('=') 
-          ? primary + '{url}'
-          : primary + '={url}';
-
-    const backupWithPlaceholder = backup 
-      ? (backup.includes('{url}') 
-          ? backup 
-          : backup.endsWith('{url}')
-            ? backup
-            : backup.endsWith('=') 
-              ? backup + '{url}'
-              : backup + '={url}')
-      : undefined;
+    const primaryWithPlaceholder = primary;
+    const backupWithPlaceholder = backup ? backup : undefined;
 
     setCorsProxy({
       primary: primaryWithPlaceholder,
@@ -663,39 +647,39 @@ function CorsSettings() {
           <p className="text-xs text-muted-foreground leading-relaxed">
             <span className="text-foreground font-medium">CORS proxy for external content.</span>{' '}
             The proxy URL is used to fetch RSS feeds and other external resources that don't support
-            CORS. Use {`{url}`} as a placeholder for the target URL. Settings are saved to your
+            CORS. The target URL will be appended to this proxy URL. Settings are saved to your
             Mixstr backup and sync across devices.
           </p>
         </CardContent>
       </Card>
 
-      {/* Primary proxy */}
-      <div className="space-y-2">
-        <Label className="text-sm font-semibold">Primary CORS Proxy</Label>
-        <Input
-          value={primaryProxy}
-          onChange={(e) => setPrimaryProxy(e.target.value)}
-          placeholder="https://proxy.example.com/?url="
-          className="font-mono text-sm h-9"
-        />
-        <p className="text-[11px] text-muted-foreground">
-          Required. The proxy will prepend this URL to external requests.
-        </p>
-      </div>
+       {/* Primary proxy */}
+       <div className="space-y-2">
+         <Label className="text-sm font-semibold">Primary CORS Proxy</Label>
+         <Input
+           value={primaryProxy}
+           onChange={(e) => setPrimaryProxy(e.target.value)}
+           placeholder="https://proxy.example.com/?url="
+           className="font-mono text-sm h-9"
+         />
+         <p className="text-[11px] text-muted-foreground">
+           Required. The target URL will be appended to this proxy URL.
+         </p>
+       </div>
 
-      {/* Backup proxy */}
-      <div className="space-y-2">
-        <Label className="text-sm font-semibold">Backup CORS Proxy (Optional)</Label>
-        <Input
-          value={backupProxy}
-          onChange={(e) => setBackupProxy(e.target.value)}
-          placeholder="https://backup-proxy.example.com/?url="
-          className="font-mono text-sm h-9"
-        />
-        <p className="text-[11px] text-muted-foreground">
-          Used if the primary proxy fails. Leave empty to disable backup.
-        </p>
-      </div>
+       {/* Backup proxy */}
+       <div className="space-y-2">
+         <Label className="text-sm font-semibold">Backup CORS Proxy (Optional)</Label>
+         <Input
+           value={backupProxy}
+           onChange={(e) => setBackupProxy(e.target.value)}
+           placeholder="https://backup-proxy.example.com/?url="
+           className="font-mono text-sm h-9"
+         />
+         <p className="text-[11px] text-muted-foreground">
+           Used if the primary proxy fails. Leave empty to disable backup.
+         </p>
+       </div>
 
       {/* Save */}
       <Button onClick={handleSave} className="bg-primary text-primary-foreground hover:bg-primary/90">

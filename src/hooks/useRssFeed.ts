@@ -206,8 +206,7 @@ function parseRss(xml: string, feedUrl: string): RssItem[] {
 }
 
 /** Fetch and parse a single RSS/Atom feed URL */
-async function fetchRss(url: string, signal: AbortSignal): Promise<RssItem[]> {
-  const { corsProxy } = useMixstr();
+async function fetchRss(url: string, signal: AbortSignal, corsProxy: { primary: string; backup?: string }): Promise<RssItem[]> {
   const { primary: primaryUrl, backup: backupUrl } = proxyUrl(url, corsProxy.primary, corsProxy.backup);
 
   // Try primary proxy first
@@ -244,6 +243,7 @@ async function fetchRss(url: string, signal: AbortSignal): Promise<RssItem[]> {
  * Fetches all RSS sources from a list and returns merged, sorted items.
  */
 export function useRssFeed(sources: ListSource[]) {
+  const { corsProxy } = useMixstr();
   const rssSources = sources.filter((s) => s.type === 'rss' && s.url);
 
   return useQuery<RssItem[]>({
@@ -254,7 +254,7 @@ export function useRssFeed(sources: ListSource[]) {
       const abort = AbortSignal.any([signal, AbortSignal.timeout(12000)]);
 
       const results = await Promise.allSettled(
-        rssSources.map((s) => fetchRss(s.url!, abort)),
+        rssSources.map((s) => fetchRss(s.url!, abort, corsProxy)),
       );
 
       const all: RssItem[] = [];
