@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useSeoMeta } from '@unhead/react';
-import { User, Shield, X, Plus, Search, Check, RefreshCw, Wifi, Trash2 } from 'lucide-react';
+import { User, Shield, X, Plus, Search, Check, RefreshCw, Wifi, Trash2, Globe } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useFollowing } from '@/hooks/useFollowing';
@@ -600,6 +600,116 @@ function BlockSettings() {
 }
 
 // ---------------------------------------------------------------------------
+// CORS Proxy Settings
+// ---------------------------------------------------------------------------
+
+function CorsSettings() {
+  const { config, updateConfig } = useAppContext();
+  const { toast } = useToast();
+
+  const [primaryProxy, setPrimaryProxy] = useState(config.corsProxyMetadata.primary);
+  const [backupProxy, setBackupProxy] = useState(config.corsProxyMetadata.backup ?? '');
+
+  const handleSave = () => {
+    const now = Math.floor(Date.now() / 1000);
+    const primary = primaryProxy.trim();
+    const backup = backupProxy.trim();
+
+    if (!primary) {
+      toast({
+        title: 'Primary proxy required',
+        description: 'Please enter a primary CORS proxy URL.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Ensure primary ends with the placeholder
+    const primaryWithPlaceholder = primary.includes('{url}') 
+      ? primary 
+      : primary.endsWith('=') 
+        ? primary + '{url}'
+        : primary + '={url}';
+
+    const backupWithPlaceholder = backup 
+      ? (backup.includes('{url}') 
+          ? backup 
+          : backup.endsWith('=') 
+            ? backup + '{url}'
+            : backup + '={url}')
+      : undefined;
+
+    updateConfig((current) => ({
+      ...current,
+      corsProxyMetadata: {
+        primary: primaryWithPlaceholder,
+        backup: backupWithPlaceholder,
+        updatedAt: now,
+      },
+    }));
+
+    toast({
+      title: 'CORS proxy saved',
+      description: backupWithPlaceholder 
+        ? 'Primary and backup proxy configured.'
+        : 'Primary proxy configured.',
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Info card */}
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="py-3 px-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            <span className="text-foreground font-medium">CORS proxy for external content.</span>{' '}
+            The proxy URL is used to fetch RSS feeds and other external resources that don't support
+            CORS. Use {`{url}`} as a placeholder for the target URL.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Primary proxy */}
+      <div className="space-y-2">
+        <Label className="text-sm font-semibold">Primary CORS Proxy</Label>
+        <Input
+          value={primaryProxy}
+          onChange={(e) => setPrimaryProxy(e.target.value)}
+          placeholder="https://proxy.example.com/?url="
+          className="font-mono text-sm h-9"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Required. The proxy will prepend this URL to external requests.
+        </p>
+      </div>
+
+      {/* Backup proxy */}
+      <div className="space-y-2">
+        <Label className="text-sm font-semibold">Backup CORS Proxy (Optional)</Label>
+        <Input
+          value={backupProxy}
+          onChange={(e) => setBackupProxy(e.target.value)}
+          placeholder="https://backup-proxy.example.com/?url="
+          className="font-mono text-sm h-9"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Used if the primary proxy fails. Leave empty to disable backup.
+        </p>
+      </div>
+
+      {/* Save */}
+      <Button onClick={handleSave} className="bg-primary text-primary-foreground hover:bg-primary/90">
+        Save CORS Proxy Configuration
+      </Button>
+
+      <p className="text-xs text-muted-foreground">
+        Changes take effect on next page reload.
+      </p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Relay Settings
 // ---------------------------------------------------------------------------
 
@@ -871,7 +981,7 @@ export function SettingsPage() {
 
       <div className="px-4 pt-4">
         <Tabs defaultValue="profile">
-          <TabsList className="mb-6 w-full grid grid-cols-3 h-9">
+          <TabsList className="mb-6 w-full grid grid-cols-4 h-9">
             <TabsTrigger value="profile" className="text-sm gap-1.5">
               <User size={13} />
               Profile
@@ -883,6 +993,10 @@ export function SettingsPage() {
             <TabsTrigger value="blocks" className="text-sm gap-1.5">
               <Shield size={13} />
               Block List
+            </TabsTrigger>
+            <TabsTrigger value="cors" className="text-sm gap-1.5">
+              <Globe size={13} />
+              CORS
             </TabsTrigger>
           </TabsList>
 
@@ -922,8 +1036,12 @@ export function SettingsPage() {
           <TabsContent value="blocks">
             <BlockSettings />
           </TabsContent>
-         </Tabs>
-       </div>
+
+          <TabsContent value="cors">
+            <CorsSettings />
+          </TabsContent>
+        </Tabs>
+      </div>
 
        {/* Mixstr Raw Edit Dialog */}
        <MixstrRawEditDialog open={rawEditOpen} onOpenChange={setRawEditOpen} />

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useAppContext } from '@/hooks/useAppContext';
 import type { ListSource } from '@/lib/sidebarLists';
 
 export interface RssEnclosure {
@@ -22,10 +23,34 @@ export interface RssItem {
   durationSec?: number;
 }
 
-const CORS_PROXY = 'https://proxy.shakespeare.diy/?url=';
+/** Get the configured CORS proxy URLs from app config */
+function getCorsProxies() {
+  try {
+    const raw = localStorage.getItem('nostr:app-config');
+    if (!raw) {
+      return {
+        primary: 'https://proxy.shakespeare.diy/?url=',
+        backup: undefined,
+      };
+    }
+    const config = JSON.parse(raw) as {
+      corsProxyMetadata?: { primary: string; backup?: string };
+    };
+    return {
+      primary: config.corsProxyMetadata?.primary ?? 'https://proxy.shakespeare.diy/?url=',
+      backup: config.corsProxyMetadata?.backup,
+    };
+  } catch {
+    return {
+      primary: 'https://proxy.shakespeare.diy/?url=',
+      backup: undefined,
+    };
+  }
+}
 
-function proxyUrl(url: string) {
-  return `${CORS_PROXY}${encodeURIComponent(url)}`;
+function proxyUrl(url: string, primary: string, backup?: string) {
+  const encoded = encodeURIComponent(url);
+  return { primary: `${primary}${encoded}`, backup: backup ? `${backup}${encoded}` : undefined };
 }
 
 /** Simple hash for a string → deterministic short id */
@@ -207,10 +232,37 @@ function parseRss(xml: string, feedUrl: string): RssItem[] {
 
 /** Fetch and parse a single RSS/Atom feed URL */
 async function fetchRss(url: string, signal: AbortSignal): Promise<RssItem[]> {
-  const res = await fetch(proxyUrl(url), { signal });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  const text = await res.text();
-  return parseRss(text, url);
+  const { primary, backup } = getCorsProxies();
+  const { primary: primaryUrl, backup: backupUrl } = proxyUrl(url, primary, backup);
+
+  // Try primary proxy first
+  try {
+    const res = await fetch(primaryUrl, { signal });
+    if (res.ok) {
+      const text = await res.text();
+      return parseRss(text, url);
+    }
+    
+    // If primary fails and we have a backup, try backup
+    if (backupUrl) {
+      const backupRes = await fetch(backupUrl, { signal });
+      if (backupRes.ok) {
+        const text = await backupRes.text();
+        return parseRss(text, url);
+      }
+      
+      // Both failed, throw error with primary status
+      throw new Error(`HTTP ${res.status} for ${url} (primary failed, backup also failed)`);
+    }
+    
+    // No backup, throw error
+    throw new Error(`HTTP ${res.status} for ${url}`);
+  } catch (error) {
+    // If it's an AbortError, rethrow it
+    if (signal.aborted) throw error;
+    // Otherwise wrap it
+    throw new Error(`Failed to fetch ${url}: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**

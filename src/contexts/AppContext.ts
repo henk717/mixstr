@@ -17,6 +17,16 @@ export interface BlossomServerMetadata {
   updatedAt: number;
 }
 
+/** CORS proxy configuration for fetching external content */
+export interface CorsProxyMetadata {
+  /** Primary CORS proxy URL template (use {url} as placeholder) */
+  primary: string;
+  /** Optional backup CORS proxy URL template (used if primary fails) */
+  backup?: string;
+  /** Unix timestamp of when the proxy config was last updated */
+  updatedAt: number;
+}
+
 export interface AppConfig {
   /** Current theme */
   theme: Theme;
@@ -30,6 +40,8 @@ export interface AppConfig {
    * are used.
    */
   useAppBlossomServers: boolean;
+  /** CORS proxy configuration */
+  corsProxyMetadata: CorsProxyMetadata;
 }
 
 export interface AppContextType {

@@ -43,6 +43,11 @@ const defaultConfig: AppConfig = {
     updatedAt: 0,
   },
   useAppBlossomServers: false,
+  corsProxyMetadata: {
+    primary: 'https://proxy.shakespeare.diy/?url=',
+    backup: undefined,
+    updatedAt: 0,
+  },
 };
 
 export function App() {
