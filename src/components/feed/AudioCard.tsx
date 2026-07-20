@@ -13,6 +13,7 @@ import {
   eventToNevent,
   extractVideos,
   extractAudio,
+  extractYouTubeUrls,
 } from '@/lib/postUtils';
 import { isRssSyntheticEvent } from '@/lib/rssAdapter';
 import { useMixstr } from '@/hooks/useMixstr';
@@ -51,13 +52,16 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
   const title = getEventTitle(displayEvent) ?? (displayEvent.content.slice(0, 60).trim() || 'Untitled Track');
   const nevent = eventToNevent(displayEvent);
   const rssLink = isRss ? displayEvent.tags.find(([k]) => k === 'link')?.[1] : undefined;
+  const youtubeVideos = extractYouTubeUrls(displayEvent);
+  const isYouTube = youtubeVideos.length > 0;
+  const youtubeThumbnail = isYouTube ? `https://img.youtube.com/vi/${youtubeVideos[0].videoId}/hqdefault.jpg` : undefined;
 
   // Nothing playable
-  if (!trackInfo) return null;
+  if (!trackInfo && !isYouTube) return null;
 
-  const explicitArtwork = trackInfo.artwork ?? cover;
+  const explicitArtwork = isYouTube ? youtubeThumbnail : (trackInfo?.artwork ?? cover);
   const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
-    !explicitArtwork && trackInfo.isVideo ? trackInfo.url : undefined,
+    !explicitArtwork && trackInfo?.isVideo ? trackInfo.url : undefined,
   );
   const artwork = explicitArtwork || videoFrame;
 
@@ -82,6 +86,21 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
   // Clicking the row opens the dedicated media player page with media URL and destination
   const handleRowClick = () => {
     const params = new URLSearchParams();
+    
+    // Check for YouTube first
+    const youtubeVideos = extractYouTubeUrls(displayEvent);
+    if (youtubeVideos.length > 0) {
+      const videoId = youtubeVideos[0].videoId;
+      const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      params.set('media', youtubeUrl);
+      params.set('title', track.title);
+      params.set('type', 'video');
+      if (rssLink) {
+        params.set('dest', rssLink);
+      }
+      navigate(`/player?${params.toString()}`);
+      return;
+    }
     
     // Prefer video URL if available, otherwise use audio URL
     const videos = extractVideos(displayEvent);
@@ -120,15 +139,17 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
           />
         ) : frameLoading ? (
           <Skeleton className="w-full h-full" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            {trackInfo.isVideo ? (
-              <Video size={20} className="text-muted-foreground" />
-            ) : (
-              <Music size={20} className="text-muted-foreground" />
-            )}
-          </div>
-        )}
+         ) : (
+           <div className="w-full h-full flex items-center justify-center">
+             {isYouTube ? (
+               <Play size={20} className="text-white" fill="white" />
+             ) : trackInfo.isVideo ? (
+               <Video size={20} className="text-muted-foreground" />
+             ) : (
+               <Music size={20} className="text-muted-foreground" />
+             )}
+           </div>
+         )}
         {/* Play overlay on hover */}
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <button
@@ -154,12 +175,17 @@ export function AudioCard({ event, moderation }: AudioCardProps) {
             {displayName}
           </Link>
         )}
-        <div className="flex items-center gap-1.5">
-          <p className="text-xs text-muted-foreground">{relativeTime(displayEvent.created_at)}</p>
-          {trackInfo.isVideo && (
-            <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded">video</span>
-          )}
-        </div>
+         <div className="flex items-center gap-1.5">
+           <p className="text-xs text-muted-foreground">{relativeTime(displayEvent.created_at)}</p>
+           {isYouTube && (
+             <span className="text-[10px] text-white bg-red-600 px-1 rounded">
+               YouTube
+             </span>
+           )}
+           {!isYouTube && trackInfo.isVideo && (
+             <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded">video</span>
+           )}
+         </div>
       </div>
 
       {/* Action buttons — stop propagation so they don't navigate */}

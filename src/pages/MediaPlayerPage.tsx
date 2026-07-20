@@ -1,7 +1,7 @@
 import { useSeoMeta } from '@unhead/react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, MessageCircle, ExternalLink, Rss, Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, X } from 'lucide-react';
+import { ArrowLeft, MessageCircle, ExternalLink, Rss, Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, ListMusic, X, Video } from 'lucide-react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
@@ -20,6 +20,7 @@ import {
   getCoverImage,
   extractVideos,
   extractAudio,
+  extractYouTubeUrls,
   relativeTime,
   eventToNevent,
   getAudioTrackInfo,
@@ -73,8 +74,10 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
   // Get media info from event (fallback mode)
   const videos = displayEvent ? extractVideos(displayEvent) : [];
   const audios = displayEvent ? extractAudio(displayEvent) : [];
+  const youtubeVideos = displayEvent ? extractYouTubeUrls(displayEvent) : [];
   const mediaUrlFromEvent = videos[0] || audios[0];
   const isVideoFromEvent = videos.length > 0;
+  const isYouTubeFromEvent = youtubeVideos.length > 0;
   const coverImageFromEvent = displayEvent ? getCoverImage(displayEvent) : undefined;
   const titleFromEvent = displayEvent ? getEventTitle(displayEvent) : undefined;
   const rssInfoFromEvent = displayEvent ? getRssItemInfo(displayEvent) : null;
@@ -84,6 +87,12 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
   const isVideo = hasQueryParams 
     ? typeFromQuery === 'audio' ? false : true  // Default to video if type not specified
     : isVideoFromEvent;
+  const isYouTube = hasQueryParams 
+    ? mediaUrlFromQuery?.includes('youtube.com') || mediaUrlFromQuery?.includes('youtu.be')
+    : isYouTubeFromEvent;
+  const youtubeVideoId = isYouTube 
+    ? (mediaUrlFromQuery?.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/)?.[1] || youtubeVideos[0]?.videoId)
+    : undefined;
   const coverImage = hasQueryParams ? undefined : coverImageFromEvent;
   const title = hasQueryParams 
     ? (titleFromQuery || new URL(mediaUrlFromQuery!).pathname.split('/').pop() || 'Media Player')
@@ -132,13 +141,15 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 px-4 py-6">
         {/* Main content - video player and info */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Video/Audio Player */}
-          <MediaPlayer
-            url={mediaUrl}
-            isVideo={isVideo}
-            title={title ?? displayEvent.content.slice(0, 60)}
-            coverImage={coverImage}
-          />
+           {/* Video/Audio Player */}
+           <MediaPlayer
+             url={mediaUrl}
+             isVideo={isVideo}
+             title={title ?? displayEvent.content.slice(0, 60)}
+             coverImage={coverImage}
+             isYouTube={isYouTube}
+             youtubeVideoId={youtubeVideoId}
+           />
 
             {/* Video Info */}
             <Card>
@@ -251,10 +262,10 @@ export function MediaPlayerPage({}: MediaPlayerPageProps) {
                    ) : null}
                  </div>
 
-                 {/* Media Type Badge */}
-                 <Badge variant={isVideo ? 'default' : 'secondary'}>
-                   {isVideo ? 'Video' : 'Audio'}
-                 </Badge>
+                  {/* Media Type Badge */}
+                  <Badge variant={isYouTube ? 'destructive' : isVideo ? 'default' : 'secondary'}>
+                    {isYouTube ? 'YouTube' : isVideo ? 'Video' : 'Audio'}
+                  </Badge>
                </div>
 
                {/* Description (only for Nostr events) */}
@@ -315,9 +326,11 @@ interface MediaPlayerProps {
   isVideo: boolean;
   title: string;
   coverImage?: string;
+  isYouTube?: boolean;
+  youtubeVideoId?: string;
 }
 
-function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
+function MediaPlayer({ url, isVideo, title, coverImage, isYouTube = false, youtubeVideoId }: MediaPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -325,7 +338,7 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
   const [muted, setMuted] = useState(false);
   const [hlsLoaded, setHlsLoaded] = useState(false);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement>(null);
-  const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(isVideo ? url : undefined);
+  const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(!isYouTube && isVideo ? url : undefined);
   const isHls = url?.endsWith('.m3u8') || /m3u8/i.test(url);
 
   // Load hls.js script if needed
@@ -341,9 +354,11 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
     }
   }, [isHls, hlsLoaded]);
 
+
+
   useEffect(() => {
     const media = mediaRef.current;
-    if (!media) return;
+    if (!media || isYouTube) return;
 
     // Initialize HLS.js for HLS streams
     let hls: any = null;
@@ -414,7 +429,7 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
         hls.destroy();
       }
     };
-  }, [url, isHls, isVideo, hlsLoaded]);
+  }, [url, isHls, isVideo, hlsLoaded, isYouTube]);
 
   const togglePlay = () => {
     const media = mediaRef.current;
@@ -445,112 +460,123 @@ function MediaPlayer({ url, isVideo, title, coverImage }: MediaPlayerProps) {
   const displayThumbnail = coverImage || videoFrame;
 
   return (
-    <div className="space-y-3">
-      {/* Video Player */}
-      <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
-        {isVideo ? (
-          <video
-            ref={mediaRef as React.RefObject<HTMLVideoElement>}
-            src={url}
-            className="w-full h-full object-contain"
-            onClick={togglePlay}
-            preload="metadata"
-          />
-        ) : (
-          <>
-            <audio
-              ref={mediaRef as React.RefObject<HTMLAudioElement>}
-              src={url}
-              preload="metadata"
-            />
-            {/* Audio visual placeholder */}
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/10">
-              {displayThumbnail ? (
-                <img
-                  src={displayThumbnail}
-                  alt={title}
-                  className="max-h-full max-w-full rounded-lg shadow-2xl"
-                  loading="lazy"
-                />
-              ) : frameLoading ? (
-                <Skeleton className="w-32 h-32 rounded-lg" />
-              ) : (
-                <Play size={48} className="text-primary/50" />
-              )}
-            </div>
-          </>
-        )}
+     <div className="space-y-3">
+       {/* Video Player */}
+       <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+         {isYouTube && youtubeVideoId ? (
+           // YouTube iframe player - simple, no custom controls
+           <iframe
+             src={`https://www.youtube-nocookie.com/embed/${youtubeVideoId}?rel=0${muted ? '&mute=1' : ''}`}
+             className="w-full h-full"
+             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+             allowFullScreen
+             title="YouTube video player"
+           />
+         ) : isVideo ? (
+           <video
+             ref={mediaRef as React.RefObject<HTMLVideoElement>}
+             src={url}
+             className="w-full h-full object-contain"
+             onClick={togglePlay}
+             preload="metadata"
+           />
+         ) : (
+           <>
+             <audio
+               ref={mediaRef as React.RefObject<HTMLAudioElement>}
+               src={url}
+               preload="metadata"
+             />
+             {/* Audio visual placeholder */}
+             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/20 to-primary/10">
+               {displayThumbnail ? (
+                 <img
+                   src={displayThumbnail}
+                   alt={title}
+                   className="max-h-full max-w-full rounded-lg shadow-2xl"
+                   loading="lazy"
+                 />
+               ) : frameLoading ? (
+                 <Skeleton className="w-32 h-32 rounded-lg" />
+               ) : (
+                 <Play size={48} className="text-primary/50" />
+               )}
+             </div>
+           </>
+         )}
 
-        {/* Play/Pause Overlay */}
-        {!isPlaying && (
-          <div
-            className="absolute inset-0 flex items-center justify-center bg-black/30 cursor-pointer"
-            onClick={togglePlay}
-          >
-            <div className="w-16 h-16 rounded-full bg-black/70 flex items-center justify-center backdrop-blur-sm hover:scale-110 transition-transform">
-              <Play size={32} className="text-white ml-1" fill="white" />
-            </div>
-          </div>
-        )}
+         {/* Play/Pause Overlay - only for non-YouTube */}
+         {!isYouTube && !isPlaying && (
+           <div
+             className="absolute inset-0 flex items-center justify-center bg-black/30 cursor-pointer"
+             onClick={togglePlay}
+           >
+             <div className="w-16 h-16 rounded-full bg-black/70 flex items-center justify-center backdrop-blur-sm hover:scale-110 transition-transform">
+               <Play size={32} className="text-white ml-1" fill="white" />
+             </div>
+           </div>
+         )}
 
-        {/* Controls Overlay */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 opacity-0 hover:opacity-100 transition-opacity">
-          {/* Progress Bar */}
-          <Slider
-            value={[progress]}
-            onValueChange={handleSeek}
-            max={100}
-            step={0.1}
-            className="mb-3 [&_[role=slider]]:w-3 [&_[role=slider]]:h-3"
-          />
+         {/* Controls Overlay - only for non-YouTube */}
+         {!isYouTube && (
+           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 opacity-0 hover:opacity-100 transition-opacity">
+             {/* Progress Bar */}
+             <Slider
+               value={[progress]}
+               onValueChange={handleSeek}
+               max={100}
+               step={0.1}
+               className="mb-3 [&_[role=slider]]:w-3 [&_[role=slider]]:h-3"
+             />
 
-          {/* Controls */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={togglePlay}
-                className="text-white hover:text-primary transition-colors"
-              >
-                {isPlaying ? (
-                  <Pause size={24} fill="currentColor" />
-                ) : (
-                  <Play size={24} fill="currentColor" className="ml-0.5" />
-                )}
-              </button>
-              <span className="text-white text-sm">
-                {formatTime(mediaRef.current?.currentTime || 0)} / {isFinite(duration) && duration > 0 ? formatTime(duration) : '--:--'}
-              </span>
-            </div>
+             {/* Controls */}
+             <div className="flex items-center justify-between">
+               <div className="flex items-center gap-2">
+                 <button
+                   onClick={togglePlay}
+                   className="text-white hover:text-primary transition-colors"
+                 >
+                   {isPlaying ? (
+                     <Pause size={24} fill="currentColor" />
+                   ) : (
+                     <Play size={24} fill="currentColor" className="ml-0.5" />
+                   )}
+                 </button>
+                 <span className="text-white text-sm">
+                   {formatTime(mediaRef.current?.currentTime || 0)} / {isFinite(duration) && duration > 0 ? formatTime(duration) : '--:--'}
+                 </span>
+               </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setMuted(!muted)}
-                className="text-white hover:text-primary transition-colors"
-              >
-                {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-              </button>
-              <div className="w-20">
-                <Slider
-                  value={[muted ? 0 : volume * 100]}
-                  onValueChange={(v) => {
-                    setVolume(v[0] / 100);
-                    setMuted(v[0] === 0);
-                    const media = mediaRef.current;
-                    if (media) {
-                      media.volume = v[0] / 100;
-                      media.muted = v[0] === 0;
-                    }
-                  }}
-                  max={100}
-                  step={1}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+               <div className="flex items-center gap-2">
+                 <button
+                   onClick={() => setMuted(!muted)}
+                   className="text-white hover:text-primary transition-colors"
+                 >
+                   {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                 </button>
+                 <div className="w-20">
+                   <Slider
+                     value={[muted ? 0 : volume * 100]}
+                     onValueChange={(v) => {
+                       setVolume(v[0] / 100);
+                       setMuted(v[0] === 0);
+                       const media = mediaRef.current;
+                       if (media) {
+                         media.volume = v[0] / 100;
+                         media.muted = v[0] === 0;
+                       }
+                     }}
+                     max={100}
+                     step={1}
+                   />
+                 </div>
+               </div>
+             </div>
+           </div>
+         )}
+       </div>
+     </div>
+   );
 }
 
 function UpNextList({ eventId }: { eventId: string }) {
@@ -593,29 +619,40 @@ function UpNextList({ eventId }: { eventId: string }) {
     );
   }
 
-   return (
-     <div className="space-y-2">
-       {relatedEvents.map((event) => {
-         const videos = extractVideos(event);
-         const audios = extractAudio(event);
-         const videoUrl = videos[0] || audios[0];
-         const thumbnail = getCoverImage(event);
-         const videoTitle = getEventTitle(event) ?? event.content.slice(0, 50);
-         const isRss = isRssSyntheticEvent(event);
-         const rssInfo = getRssItemInfo(event);
-         const rssLink = isRss ? event.tags.find(([k]) => k === 'link')?.[1] : undefined;
-         const isVideo = videos.length > 0;
+    return (
+      <div className="space-y-2">
+        {relatedEvents.map((event) => {
+          const videos = extractVideos(event);
+          const audios = extractAudio(event);
+          const youtubeVideos = extractYouTubeUrls(event);
+          const videoUrl = videos[0] || audios[0];
+          const isYouTube = youtubeVideos.length > 0;
+          const youtubeVideoId = youtubeVideos[0]?.videoId;
+          const thumbnail = getCoverImage(event);
+          const videoTitle = getEventTitle(event) ?? event.content.slice(0, 50);
+          const isRss = isRssSyntheticEvent(event);
+          const rssInfo = getRssItemInfo(event);
+          const rssLink = isRss ? event.tags.find(([k]) => k === 'link')?.[1] : undefined;
+          const isVideo = videos.length > 0;
 
-         const handleCardClick = () => {
-           const params = new URLSearchParams();
-           params.set('media', videoUrl);
-           params.set('title', videoTitle);
-           params.set('type', isVideo ? 'video' : 'audio');
-           if (rssLink) {
-             params.set('dest', rssLink);
-           }
-           navigate(`/player?${params.toString()}`);
-         };
+          const handleCardClick = () => {
+            const params = new URLSearchParams();
+            if (isYouTube && youtubeVideoId) {
+              // For YouTube, construct a URL that the player can use
+              const youtubeUrl = `https://www.youtube.com/watch?v=${youtubeVideoId}`;
+              params.set('media', youtubeUrl);
+              params.set('title', videoTitle);
+              params.set('type', 'video');
+            } else if (videoUrl) {
+              params.set('media', videoUrl);
+              params.set('title', videoTitle);
+              params.set('type', isVideo ? 'video' : 'audio');
+            }
+            if (rssLink) {
+              params.set('dest', rssLink);
+            }
+            navigate(`/player?${params.toString()}`);
+          };
 
          return (
            <Card
@@ -636,11 +673,11 @@ function UpNextList({ eventId }: { eventId: string }) {
                   <Play size={24} className="text-muted-foreground" />
                 </div>
               )}
-              <div className="absolute top-2 right-2">
-                <Badge variant="secondary" className="text-[10px]">
-                  {extractVideos(event).length > 0 ? 'Video' : 'Audio'}
-                </Badge>
-              </div>
+               <div className="absolute top-2 right-2">
+                 <Badge variant={isYouTube ? 'destructive' : 'secondary'} className="text-[10px]">
+                   {isYouTube ? 'YouTube' : extractVideos(event).length > 0 ? 'Video' : 'Audio'}
+                 </Badge>
+               </div>
             </div>
             <CardContent className="p-3">
               <p className="text-sm font-medium line-clamp-2">{videoTitle}</p>

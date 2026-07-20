@@ -65,6 +65,41 @@ export function extractVideos(event: NostrEvent): string[] {
   return urls;
 }
 
+/** Extract YouTube video URLs and return video IDs */
+export function extractYouTubeUrls(event: NostrEvent): Array<{ url: string; videoId: string }> {
+  const results: Array<{ url: string; videoId: string }> = [];
+  const seen = new Set<string>();
+
+  // Check tags first
+  for (const tag of event.tags) {
+    if (tag[0] === 'url' || tag[0] === 'u') {
+      const url = tag[1];
+      const ytMatch = url.match(
+        /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/,
+      );
+      if (ytMatch && !seen.has(ytMatch[1])) {
+        seen.add(ytMatch[1]);
+        results.push({ url, videoId: ytMatch[1] });
+      }
+    }
+  }
+
+  // Check content
+  const ytRegex = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/gi;
+  const matches = event.content.match(ytRegex) ?? [];
+  for (const match of matches) {
+    const videoIdMatch = match.match(
+      /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/,
+    );
+    if (videoIdMatch && !seen.has(videoIdMatch[1])) {
+      seen.add(videoIdMatch[1]);
+      results.push({ url: match, videoId: videoIdMatch[1] });
+    }
+  }
+
+  return results;
+}
+
 /** Extract audio URLs */
 export function extractAudio(event: NostrEvent): string[] {
   const urls: string[] = [];

@@ -10,6 +10,7 @@ import {
   extractVideos,
   extractAudio,
   extractExternalEmbeds,
+  extractYouTubeUrls,
   getEventTitle,
   isLivestream,
   getLivestreamInfo,
@@ -46,15 +47,17 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
 
   const { addToQueue } = useMixstr();
 
-    const images = extractImages(displayEvent);
-    const videos = extractVideos(displayEvent);
-    const audios = extractAudio(displayEvent);
-    const embeds = extractExternalEmbeds(displayEvent);
-    const livestream = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
-    const isVideo = videos.length > 0;
-    const isAudio = audios.length > 0 && !isVideo;
-    const isEmbed = embeds.length > 0 && !isVideo && !isAudio;
-    const embed = embeds[0];
+     const images = extractImages(displayEvent);
+     const videos = extractVideos(displayEvent);
+     const audios = extractAudio(displayEvent);
+     const youtubeVideos = extractYouTubeUrls(displayEvent);
+     const embeds = extractExternalEmbeds(displayEvent);
+     const livestream = isLivestream(displayEvent) ? getLivestreamInfo(displayEvent) : null;
+     const isVideo = videos.length > 0;
+     const isYouTube = youtubeVideos.length > 0;
+     const isAudio = audios.length > 0 && !isVideo && !isYouTube;
+     const isEmbed = embeds.length > 0 && !isVideo && !isAudio && !isYouTube;
+     const embed = embeds[0];
 
   // For livestreams, use the host pubkey (actual streamer) instead of event author
   const hostPubkey = livestream?.hostPubkey ?? displayEvent.pubkey;
@@ -70,45 +73,61 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
   const title = livestream?.title ?? (getEventTitle(displayEvent) ?? displayEvent.content.slice(0, 80).trim());
   const livestreamThumbnail = livestream?.thumbnail ?? getCoverImage(displayEvent);
   
-   // Choose thumbnail: livestream first, then embed, then images, then video frame
-   const thumbnail = livestreamThumbnail ?? embed?.thumbnail ?? images[0];
-   const firstVideo = videos[0];
-   const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
-     !thumbnail && firstVideo ? firstVideo : undefined,
-   );
-   const displayThumbnail = thumbnail || videoFrame;
-   const isAudioOnly = isAudio && !displayThumbnail;
+    // Choose thumbnail: livestream first, then YouTube, then embed, then images, then video frame
+    const youtubeThumbnail = isYouTube ? `https://img.youtube.com/vi/${youtubeVideos[0].videoId}/hqdefault.jpg` : undefined;
+    const thumbnail = livestreamThumbnail ?? youtubeThumbnail ?? embed?.thumbnail ?? images[0];
+    const firstVideo = videos[0];
+    const { dataUrl: videoFrame, loading: frameLoading } = useVideoThumbnail(
+      !thumbnail && firstVideo ? firstVideo : undefined,
+    );
+    const displayThumbnail = thumbnail || videoFrame;
+    const isAudioOnly = isAudio && !displayThumbnail;
   const nevent = eventToNevent(displayEvent);
   const naddr = livestream ? livestreamToNaddr(displayEvent) : '';
 
-   // Nothing displayable
-   if (!thumbnail && !isVideo && !isAudio && !isEmbed && !livestream) return null;
+    // Nothing displayable
+    if (!thumbnail && !isVideo && !isAudio && !isEmbed && !isYouTube && !livestream) return null;
 
-    const handleCardClick = () => {
-      // For RSS events with video/audio, navigate to the new player
-      if (isRss && (videos.length > 0 || audios.length > 0)) {
-        const params = new URLSearchParams();
-        const mediaUrl = videos.length > 0 ? videos[0] : audios[0];
-        const isVideoType = videos.length > 0;
-        params.set('media', mediaUrl);
-        params.set('title', title);
-        params.set('type', isVideoType ? 'video' : 'audio');
-        if (rssLink) {
-          params.set('dest', rssLink);
-        }
-        navigate(`/player?${params.toString()}`);
-        return;
-      }
-      
-      // For RSS events without media (images only), open the external link
-      if (rssLink) {
-        window.open(rssLink, '_blank', 'noopener,noreferrer');
-        return;
-      }
-      
-      // Use naddr for livestreams, nevent for everything else (including audio)
-      navigate(`/${livestream ? naddr : nevent}`);
-    };
+     const handleCardClick = () => {
+       // For YouTube videos, navigate to the player
+       if (isYouTube && youtubeVideos.length > 0) {
+         const params = new URLSearchParams();
+         const videoId = youtubeVideos[0].videoId;
+         const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+         params.set('media', youtubeUrl);
+         params.set('title', title);
+         params.set('type', 'video');
+         if (rssLink) {
+           params.set('dest', rssLink);
+         }
+         navigate(`/player?${params.toString()}`);
+         return;
+       }
+       
+       // For RSS events with video/audio, navigate to the new player
+       if (isRss && (videos.length > 0 || audios.length > 0)) {
+         const params = new URLSearchParams();
+         const mediaUrl = videos.length > 0 ? videos[0] : audios[0];
+         const isVideoType = videos.length > 0;
+         params.set('media', mediaUrl);
+         params.set('title', title);
+         params.set('type', isVideoType ? 'video' : 'audio');
+         if (rssLink) {
+           params.set('dest', rssLink);
+         }
+         navigate(`/player?${params.toString()}`);
+         return;
+       }
+       
+       // For RSS events without media (images only), open the external link
+       if (rssLink) {
+         window.open(rssLink, '_blank', 'noopener,noreferrer');
+         return;
+       }
+       
+       // Use naddr for livestreams, nevent for everything else (including audio)
+       navigate(`/${livestream ? naddr : nevent}`);
+     };
 
   const handleAddToQueue = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -124,7 +143,7 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
     addToQueue(track);
   };
 
-   const hasQueueable = videos.length > 0 || audios.length > 0;
+    const hasQueueable = (videos.length > 0 || audios.length > 0) && !isYouTube;
 
   return (
     <div
@@ -157,14 +176,14 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
            </div>
          )}
 
-         {/* Play overlay */}
-         {(isVideo || isAudio || isEmbed) && (
-           <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35 transition-colors">
-             <div className="w-12 h-12 rounded-full bg-black/70 flex items-center justify-center">
-               <Play size={20} className="text-white ml-0.5" fill="white" />
-             </div>
-           </div>
-         )}
+          {/* Play overlay */}
+          {(isVideo || isAudio || isEmbed || isYouTube) && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/35 transition-colors">
+              <div className="w-12 h-12 rounded-full bg-black/70 flex items-center justify-center">
+                <Play size={20} className="text-white ml-0.5" fill="white" />
+              </div>
+            </div>
+          )}
 
         {/* Live badge */}
         {livestream?.status === 'live' && (
@@ -174,22 +193,27 @@ export function MediaCard({ event, moderation }: MediaCardProps) {
           </div>
         )}
 
-        {/* Source badge */}
-        {isEmbed && embed && (
-          <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded capitalize">
-            {embed.type}
-          </div>
-        )}
-         {isVideo && !isEmbed && !isAudio && (
-           <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
-             video
+         {/* Source badge */}
+         {isYouTube && (
+           <div className="absolute bottom-2 right-2 bg-red-600 text-white text-xs px-1.5 py-0.5 rounded">
+             YouTube
            </div>
          )}
-         {isAudio && !isEmbed && (
-           <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
-             audio
+         {isEmbed && embed && !isYouTube && (
+           <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded capitalize">
+             {embed.type}
            </div>
          )}
+          {isVideo && !isEmbed && !isAudio && !isYouTube && (
+            <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
+              video
+            </div>
+          )}
+          {isAudio && !isEmbed && !isYouTube && (
+            <div className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-1.5 py-0.5 rounded">
+              audio
+            </div>
+          )}
 
          {/* Add to queue button for videos and audio */}
          {hasQueueable && (
