@@ -604,14 +604,13 @@ function BlockSettings() {
 // ---------------------------------------------------------------------------
 
 function CorsSettings() {
-  const { config, updateConfig } = useAppContext();
+  const { corsProxy, setCorsProxy } = useMixstr();
   const { toast } = useToast();
 
-  const [primaryProxy, setPrimaryProxy] = useState(config.corsProxyMetadata.primary);
-  const [backupProxy, setBackupProxy] = useState(config.corsProxyMetadata.backup ?? '');
+  const [primaryProxy, setPrimaryProxy] = useState(corsProxy.primary);
+  const [backupProxy, setBackupProxy] = useState(corsProxy.backup ?? '');
 
   const handleSave = () => {
-    const now = Math.floor(Date.now() / 1000);
     const primary = primaryProxy.trim();
     const backup = backupProxy.trim();
 
@@ -624,35 +623,35 @@ function CorsSettings() {
       return;
     }
 
-    // Ensure primary ends with the placeholder
+    // Ensure primary has the placeholder (but don't add it if already present)
     const primaryWithPlaceholder = primary.includes('{url}') 
       ? primary 
-      : primary.endsWith('=') 
-        ? primary + '{url}'
-        : primary + '={url}';
+      : primary.endsWith('{url}')
+        ? primary
+        : primary.endsWith('=') 
+          ? primary + '{url}'
+          : primary + '={url}';
 
     const backupWithPlaceholder = backup 
       ? (backup.includes('{url}') 
           ? backup 
-          : backup.endsWith('=') 
-            ? backup + '{url}'
-            : backup + '={url}')
+          : backup.endsWith('{url}')
+            ? backup
+            : backup.endsWith('=') 
+              ? backup + '{url}'
+              : backup + '={url}')
       : undefined;
 
-    updateConfig((current) => ({
-      ...current,
-      corsProxyMetadata: {
-        primary: primaryWithPlaceholder,
-        backup: backupWithPlaceholder,
-        updatedAt: now,
-      },
-    }));
+    setCorsProxy({
+      primary: primaryWithPlaceholder,
+      backup: backupWithPlaceholder,
+    });
 
     toast({
       title: 'CORS proxy saved',
       description: backupWithPlaceholder 
-        ? 'Primary and backup proxy configured.'
-        : 'Primary proxy configured.',
+        ? 'Primary and backup proxy configured. Will sync to your Nostr backup.'
+        : 'Primary proxy configured. Will sync to your Nostr backup.',
     });
   };
 
@@ -664,7 +663,8 @@ function CorsSettings() {
           <p className="text-xs text-muted-foreground leading-relaxed">
             <span className="text-foreground font-medium">CORS proxy for external content.</span>{' '}
             The proxy URL is used to fetch RSS feeds and other external resources that don't support
-            CORS. Use {`{url}`} as a placeholder for the target URL.
+            CORS. Use {`{url}`} as a placeholder for the target URL. Settings are saved to your
+            Mixstr backup and sync across devices.
           </p>
         </CardContent>
       </Card>
@@ -703,7 +703,8 @@ function CorsSettings() {
       </Button>
 
       <p className="text-xs text-muted-foreground">
-        Changes take effect on next page reload.
+        Changes take effect immediately. Your CORS proxy settings are encrypted and backed up
+        to Nostr (kind 30078) so they sync across your devices.
       </p>
     </div>
   );

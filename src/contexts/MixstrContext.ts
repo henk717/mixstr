@@ -2,6 +2,7 @@ import { createContext } from 'react';
 import type { NostrEvent } from '@nostrify/nostrify';
 import type { SidebarList } from '@/lib/sidebarLists';
 import type { SpamSettings } from '@/lib/spam';
+import type { CorsProxySettings } from '@/lib/corsProxy';
 
 export type FeedViewMode = 'short' | 'longform' | 'media' | 'audio';
 
@@ -28,6 +29,10 @@ export interface MixstrContextType {
   /** Automatic spam-detection settings */
   spamSettings: SpamSettings;
   setSpamSettings: (settings: SpamSettings) => void;
+
+  /** CORS proxy configuration */
+  corsProxy: CorsProxySettings;
+  setCorsProxy: (settings: CorsProxySettings) => void;
 
   /** Last notification read timestamp (Unix seconds) */
   lastNotificationReadAt: number;

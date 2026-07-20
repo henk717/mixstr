@@ -11,6 +11,12 @@ import {
   mergeSpamSettings,
   type SpamSettings,
 } from '@/lib/spam';
+import {
+  loadCorsProxy,
+  saveCorsProxy,
+  mergeCorsProxy,
+  type CorsProxySettings,
+} from '@/lib/corsProxy';
 import { useMixstrSync, type MixstrConfig } from '@/hooks/useMixstrBackup';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
@@ -18,6 +24,7 @@ function MixstrSyncInner({
   sidebarLists,
   feedViewModes,
   spamSettings,
+  corsProxy,
   lastNotificationReadAt,
   onRemoteLoaded,
   onScheduleBackup,
@@ -25,11 +32,12 @@ function MixstrSyncInner({
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
   spamSettings: SpamSettings;
+  corsProxy: CorsProxySettings;
   lastNotificationReadAt: number;
   onRemoteLoaded: (config: MixstrConfig) => void;
   onScheduleBackup: (fn: () => void) => void;
 }) {
-  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, spamSettings, lastNotificationReadAt, onRemoteLoaded });
+  const { scheduleBackup } = useMixstrSync({ sidebarLists, feedViewModes, spamSettings, corsProxy, lastNotificationReadAt, onRemoteLoaded });
 
   // Expose scheduleBackup up to parent on each render
   useEffect(() => {
@@ -52,6 +60,9 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   );
   const [spamSettings, setSpamSettingsState] = useState<SpamSettings>(() =>
     loadSpamSettings(undefined),
+  );
+  const [corsProxy, setCorsProxyState] = useState<CorsProxySettings>(() =>
+    loadCorsProxy(undefined),
   );
   const [lastNotificationReadAt, setLastNotificationReadAt] = useState<number>(0);
   const [audioQueue, setAudioQueue] = useState<AudioTrack[]>([]);
@@ -84,6 +95,9 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
     // Load spam settings for this account
     setSpamSettingsState(loadSpamSettings(newPubkey));
 
+    // Load CORS proxy settings for this account
+    setCorsProxyState(loadCorsProxy(newPubkey));
+
     // Reset view modes — they'll be restored from the Nostr backup if available
     setFeedViewModes({});
   }, [user?.pubkey]);
@@ -100,6 +114,12 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   const setSpamSettings = useCallback((next: SpamSettings) => {
     setSpamSettingsState(next);
     saveSpamSettings(next, activePubkeyRef.current);
+    setTimeout(() => scheduleBackupRef.current(), 0);
+  }, []);
+
+  const setCorsProxy = useCallback((next: CorsProxySettings) => {
+    setCorsProxyState(next);
+    saveCorsProxy(next, activePubkeyRef.current);
     setTimeout(() => scheduleBackupRef.current(), 0);
   }, []);
 
@@ -142,6 +162,15 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
       if (remoteTs > 0 && config.spamSettings) {
         const merged = mergeSpamSettings(config.spamSettings);
         saveSpamSettings(merged, activePubkeyRef.current);
+        return merged;
+      }
+      return local;
+    });
+    setCorsProxyState((local) => {
+      const remoteTs = config.savedAt ?? 0;
+      if (remoteTs > 0 && config.corsProxy) {
+        const merged = mergeCorsProxy(config.corsProxy);
+        saveCorsProxy(merged, activePubkeyRef.current);
         return merged;
       }
       return local;
@@ -253,44 +282,47 @@ export function MixstrProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-<MixstrContext.Provider
-        value={{
-          feedViewModes,
-          setFeedViewMode,
-          sidebarLists,
-          setSidebarLists,
-          addSidebarList,
-          updateSidebarList,
-          removeSidebarList,
-          spamSettings,
-          setSpamSettings,
-          lastNotificationReadAt,
-          setLastNotificationReadAt: setLastNotificationReadAtHandler,
-          audioQueue,
-          currentTrack,
-          isPlaying,
-          addToQueue,
-          playTrack,
-          playNext,
-          playPrev,
-          togglePlay,
-          clearQueue,
-          audioProgress,
-          setAudioProgress,
-          audioDuration,
-          setAudioDuration,
-        }}
-      >
-      {/* Sync component — rendered inside the provider so it can access Nostr hooks */}
-      <MixstrSyncInner
-        sidebarLists={sidebarLists}
-        feedViewModes={feedViewModes}
-        spamSettings={spamSettings}
-        lastNotificationReadAt={lastNotificationReadAt}
-        onRemoteLoaded={handleRemoteLoaded}
-        onScheduleBackup={(fn) => { scheduleBackupRef.current = fn; }}
-      />
-      {children}
-    </MixstrContext.Provider>
-  );
+     <MixstrContext.Provider
+         value={{
+           feedViewModes,
+           setFeedViewMode,
+           sidebarLists,
+           setSidebarLists,
+           addSidebarList,
+           updateSidebarList,
+           removeSidebarList,
+           spamSettings,
+           setSpamSettings,
+           corsProxy,
+           setCorsProxy,
+           lastNotificationReadAt,
+           setLastNotificationReadAt: setLastNotificationReadAtHandler,
+           audioQueue,
+           currentTrack,
+           isPlaying,
+           addToQueue,
+           playTrack,
+           playNext,
+           playPrev,
+           togglePlay,
+           clearQueue,
+           audioProgress,
+           setAudioProgress,
+           audioDuration,
+           setAudioDuration,
+         }}
+       >
+       {/* Sync component — rendered inside the provider so it can access Nostr hooks */}
+       <MixstrSyncInner
+         sidebarLists={sidebarLists}
+         feedViewModes={feedViewModes}
+         spamSettings={spamSettings}
+         corsProxy={corsProxy}
+         lastNotificationReadAt={lastNotificationReadAt}
+         onRemoteLoaded={handleRemoteLoaded}
+         onScheduleBackup={(fn) => { scheduleBackupRef.current = fn; }}
+       />
+       {children}
+     </MixstrContext.Provider>
+   );
 }

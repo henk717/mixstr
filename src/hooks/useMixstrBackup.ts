@@ -21,6 +21,7 @@ import { useNostrPublish } from './useNostrPublish';
 import type { SidebarList } from '@/lib/sidebarLists';
 import type { FeedViewMode } from '@/contexts/MixstrContext';
 import type { SpamSettings } from '@/lib/spam';
+import type { CorsProxySettings } from '@/lib/corsProxy';
 
 const D_TAG = 'mixstr-config-v1';
 
@@ -28,6 +29,7 @@ export interface MixstrConfig {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
   spamSettings: SpamSettings;
+  corsProxy: CorsProxySettings;
   lastNotificationReadAt: number;
   savedAt: number;
 }
@@ -100,12 +102,14 @@ export function useMixstrSync({
   sidebarLists,
   feedViewModes,
   spamSettings,
+  corsProxy,
   lastNotificationReadAt,
   onRemoteLoaded,
 }: {
   sidebarLists: SidebarList[];
   feedViewModes: Record<string, FeedViewMode>;
   spamSettings: SpamSettings;
+  corsProxy: CorsProxySettings;
   lastNotificationReadAt: number;
   onRemoteLoaded: (config: MixstrConfig) => void;
 }) {
@@ -141,6 +145,7 @@ export function useMixstrSync({
         sidebarLists,
         feedViewModes,
         spamSettings,
+        corsProxy,
         lastNotificationReadAt,
         savedAt: Math.floor(Date.now() / 1000),
       };
@@ -154,7 +159,7 @@ export function useMixstrSync({
         // Silent — backup is best-effort
       }
     }, 3000);
-  }, [user, sidebarLists, feedViewModes, spamSettings, lastNotificationReadAt, save, queryClient]);
+  }, [user, sidebarLists, feedViewModes, spamSettings, corsProxy, lastNotificationReadAt, save, queryClient]);
 
   return {
     isSyncing: fetchStatus === 'pending' || isSaving,

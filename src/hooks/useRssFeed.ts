@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useAppContext } from '@/hooks/useAppContext';
+import { useMixstr } from '@/hooks/useMixstr';
 import type { ListSource } from '@/lib/sidebarLists';
 
 export interface RssEnclosure {
@@ -21,31 +21,6 @@ export interface RssItem {
   enclosure?: RssEnclosure;
   /** Duration in seconds if supplied by the feed */
   durationSec?: number;
-}
-
-/** Get the configured CORS proxy URLs from app config */
-function getCorsProxies() {
-  try {
-    const raw = localStorage.getItem('nostr:app-config');
-    if (!raw) {
-      return {
-        primary: 'https://proxy.shakespeare.diy/?url=',
-        backup: undefined,
-      };
-    }
-    const config = JSON.parse(raw) as {
-      corsProxyMetadata?: { primary: string; backup?: string };
-    };
-    return {
-      primary: config.corsProxyMetadata?.primary ?? 'https://proxy.shakespeare.diy/?url=',
-      backup: config.corsProxyMetadata?.backup,
-    };
-  } catch {
-    return {
-      primary: 'https://proxy.shakespeare.diy/?url=',
-      backup: undefined,
-    };
-  }
 }
 
 function proxyUrl(url: string, primary: string, backup?: string) {
@@ -232,8 +207,8 @@ function parseRss(xml: string, feedUrl: string): RssItem[] {
 
 /** Fetch and parse a single RSS/Atom feed URL */
 async function fetchRss(url: string, signal: AbortSignal): Promise<RssItem[]> {
-  const { primary, backup } = getCorsProxies();
-  const { primary: primaryUrl, backup: backupUrl } = proxyUrl(url, primary, backup);
+  const { corsProxy } = useMixstr();
+  const { primary: primaryUrl, backup: backupUrl } = proxyUrl(url, corsProxy.primary, corsProxy.backup);
 
   // Try primary proxy first
   try {
